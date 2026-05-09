@@ -107,4 +107,4 @@ MIT (see LICENSE).
 
 ## Author
 
-Markus Bärsch — <https://www.markus-baersch.de>
+Markus Baersch — <https://www.markus-baersch.de>
