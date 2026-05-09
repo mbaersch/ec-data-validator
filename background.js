@@ -33,30 +33,85 @@ chrome.runtime.onStartup.addListener(() => {
   persist();
 });
 
-function extractEM(url, body) {
+function extractAllParams(url, body) {
+  let queryParams = {};
+  let bodyParams = null;
+
   try {
     const u = new URL(url);
-    const em = u.searchParams.get('em');
-    if (em) return em;
-  } catch (e) {}
-  if (body) {
-    if (body.formData && body.formData.em && body.formData.em.length > 0) {
-      return body.formData.em[0];
+    for (const [k, v] of u.searchParams.entries()) {
+      if (!(k in queryParams)) queryParams[k] = v;
     }
-    if (body.raw && body.raw.length > 0 && body.raw[0].bytes) {
-      try {
+  } catch (e) { /* leave queryParams empty */ }
+
+  if (body) {
+    try {
+      if (body.formData) {
+        bodyParams = {};
+        for (const k of Object.keys(body.formData)) {
+          const arr = body.formData[k];
+          bodyParams[k] = Array.isArray(arr) && arr.length > 0 ? String(arr[0]) : '';
+        }
+      } else if (body.raw && body.raw.length > 0 && body.raw[0].bytes) {
         const text = new TextDecoder('utf-8').decode(body.raw[0].bytes);
-        const params = new URLSearchParams(text);
-        const em = params.get('em');
-        if (em) return em;
         try {
           const obj = JSON.parse(text);
-          if (obj && typeof obj.em === 'string') return obj.em;
-        } catch (e) {}
-      } catch (e) {}
+          if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
+            bodyParams = {};
+            for (const k of Object.keys(obj)) {
+              const v = obj[k];
+              bodyParams[k] = (v !== null && typeof v === 'object') ? JSON.stringify(v) : String(v);
+            }
+          }
+        } catch (e) {
+          const params = new URLSearchParams(text);
+          bodyParams = {};
+          for (const [k, v] of params.entries()) {
+            if (!(k in bodyParams)) bodyParams[k] = v;
+          }
+        }
+      }
+    } catch (e) { bodyParams = null; }
+  }
+
+  let em = queryParams.em || (bodyParams && bodyParams.em) || null;
+  return { em, queryParams, bodyParams };
+}
+
+const CAP_BYTES = 8192;
+const VALUE_TRUNC_AT = 500;
+
+function truncValue(v) {
+  const s = String(v);
+  if (s.length <= VALUE_TRUNC_AT) return s;
+  return s.slice(0, VALUE_TRUNC_AT) + '...[+' + (s.length - VALUE_TRUNC_AT) + ' chars]';
+}
+
+function enforceCap(capture) {
+  if (JSON.stringify(capture).length <= CAP_BYTES) return;
+
+  // Stufe 1: nur Werte innerhalb queryParams + bodyParams kuerzen.
+  for (const dictKey of ['queryParams', 'bodyParams']) {
+    const dict = capture[dictKey];
+    if (!dict) continue;
+    for (const k of Object.keys(dict)) {
+      dict[k] = truncValue(dict[k]);
     }
   }
-  return null;
+  if (JSON.stringify(capture).length <= CAP_BYTES) return;
+
+  // Stufe 2: bodyParams als Stub ersetzen.
+  if (capture.bodyParams) {
+    const orig = JSON.stringify(capture.bodyParams).length;
+    capture.bodyParams = { __truncated__: true, __sizeBytes__: orig };
+    capture.truncated = true;
+  }
+  if (JSON.stringify(capture).length <= CAP_BYTES) return;
+
+  // Stufe 3 (selten): queryParams als Stub.
+  const orig = JSON.stringify(capture.queryParams).length;
+  capture.queryParams = { __truncated__: true, __sizeBytes__: orig };
+  capture.truncated = true;
 }
 
 function broadcast(msg) {
@@ -66,7 +121,7 @@ function broadcast(msg) {
 chrome.webRequest.onBeforeRequest.addListener(
   (details) => {
     if (!state.recording) return;
-    const em = extractEM(details.url, details.requestBody);
+    const { em, queryParams, bodyParams } = extractAllParams(details.url, details.requestBody);
     let host = '';
     try { host = new URL(details.url).host; } catch (e) {}
     const capture = {
@@ -74,8 +129,12 @@ chrome.webRequest.onBeforeRequest.addListener(
       url: details.url,
       host: host,
       method: details.method,
-      em: em
+      em: em,
+      queryParams: queryParams,
+      bodyParams: bodyParams,
+      truncated: false
     };
+    enforceCap(capture);
     state.captures.push(capture);
     if (state.captures.length > RING_SIZE) {
       state.captures = state.captures.slice(-RING_SIZE);
