@@ -503,6 +503,7 @@ document.addEventListener('DOMContentLoaded', () => {
         capList.innerHTML = visible.slice().reverse().map(c => {
             const realIdx = captures.indexOf(c);
             return `<div class="cap-card ${c.em ? '' : 'no-em'}" data-idx="${realIdx}">
+                <button class="cap-detail-btn" data-detail-idx="${realIdx}" aria-label="Show details" title="Show details">i</button>
                 <div class="cap-card-head">
                     <span class="cap-time">${formatTime(c.ts)}</span>
                     <span class="cap-method">${c.method}</span>
@@ -519,6 +520,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 emInput.value = cap.em;
                 runUpdate();
                 emInput.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            });
+        });
+        capList.querySelectorAll('.cap-detail-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const idx = Number(btn.dataset.detailIdx);
+                const cap = captures[idx];
+                if (cap) openDetail(cap);
             });
         });
     }
@@ -576,6 +585,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 showError('Permission denied — recording cannot start without site access.');
                 return;
             }
+            refreshPermList();
         } catch (e) {
             showError('Permission request failed: ' + e.message);
             return;
@@ -680,4 +690,123 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Pre-fill recUrl with the active tab origin (best effort)
     fillUrlFromActiveTab();
+
+    // ---------- Detail Modal (TODO 3) ----------
+    const detModal = document.getElementById('detailModal');
+    const detMeta  = document.getElementById('detMeta');
+    const detTrunc = document.getElementById('detTrunc');
+    const detQuery = document.getElementById('detQuery');
+    const detBody  = document.getElementById('detBody');
+
+    function escClose(e) { if (e.key === 'Escape') closeDetail(); }
+
+    function openDetail(cap) {
+      if (!cap) return;
+      detModal.hidden = false;
+      document.body.style.overflow = 'hidden';
+      document.addEventListener('keydown', escClose);
+
+      detMeta.innerHTML = `${formatTime(cap.ts)} · ${escapeHtml(cap.method)} · <code>${escapeHtml(cap.url)}</code>`;
+      detTrunc.hidden = !cap.truncated;
+      renderParamTable(detQuery, cap.queryParams || {}, ['em']);
+      renderParamTable(detBody,  cap.bodyParams === undefined ? null : cap.bodyParams, []);
+    }
+
+    function closeDetail() {
+      detModal.hidden = true;
+      document.body.style.overflow = '';
+      document.removeEventListener('keydown', escClose);
+    }
+
+    function renderParamTable(table, params, prioKeys) {
+      if (params === null) {
+        table.innerHTML = '<tr><td><em>No request body</em></td></tr>';
+        return;
+      }
+      if (params && params.__truncated__) {
+        table.innerHTML = `<tr><td><em>Truncated (${params.__sizeBytes__} bytes original)</em></td></tr>`;
+        return;
+      }
+      const keys = Object.keys(params);
+      if (keys.length === 0) {
+        table.innerHTML = '<tr><td><em>(empty)</em></td></tr>';
+        return;
+      }
+      const sorted = [...keys].sort();
+      const ordered = [
+        ...prioKeys.filter(k => keys.includes(k)),
+        ...sorted.filter(k => !prioKeys.includes(k))
+      ];
+      table.innerHTML = ordered.map(k => {
+        const v = String(params[k]);
+        const cell = v.length > 80
+          ? `<details><summary><code>${escapeHtml(v.slice(0,80))}…</code></summary><code>${escapeHtml(v)}</code></details>`
+          : `<code>${escapeHtml(v)}</code>`;
+        return `<tr><td><b>${escapeHtml(k)}</b></td><td>${cell}</td></tr>`;
+      }).join('');
+    }
+
+    function escapeHtml(s) {
+      return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    detModal.querySelector('.modal-backdrop').addEventListener('click', closeDetail);
+    detModal.querySelector('.modal-close').addEventListener('click', closeDetail);
+
+    // ---------- Permitted Sites (TODO 1) ----------
+    const STATIC_ORIGINS = new Set([
+      'https://*.googleadservices.com/pagead/*',
+      'https://*.googleadservices.com/ccm/*',
+      'https://www.google.com/pagead/*',
+      'https://www.google.com/ccm/*'
+    ]);
+
+    const permDetails = document.getElementById('permDetails');
+    const permCount   = document.getElementById('permCount');
+    const permList    = document.getElementById('permList');
+
+    async function refreshPermList() {
+      const perms = await chrome.permissions.getAll();
+      const optional = (perms.origins || []).filter(o => !STATIC_ORIGINS.has(o));
+      permCount.textContent = String(optional.length);
+      if (optional.length === 0) {
+        permDetails.setAttribute('disabled', '');
+        permDetails.open = false;
+      } else {
+        permDetails.removeAttribute('disabled');
+      }
+      permList.innerHTML = optional.map(o => `
+        <li><code>${escapeHtml(o)}</code><button class="perm-revoke" data-origin="${escapeHtml(o)}" aria-label="Revoke ${escapeHtml(o)}">×</button></li>
+      `).join('');
+      permList.querySelectorAll('.perm-revoke').forEach(btn => {
+        btn.addEventListener('click', () => revokeOrigin(btn.dataset.origin));
+      });
+    }
+
+    async function revokeOrigin(origin) {
+      if (recording) {
+        await new Promise(resolve => {
+          chrome.runtime.sendMessage({ type: 'stopRecording' }, () => {
+            void chrome.runtime.lastError;
+            resolve();
+          });
+        });
+        setRecordingUI(false);
+        showError('Recording gestoppt — Origin entfernt');
+        setTimeout(() => showError(''), 2500);
+      }
+      chrome.permissions.remove({ origins: [origin] }, () => {
+        void chrome.runtime.lastError;
+        // refreshPermList wird via onRemoved-Listener angestossen
+      });
+    }
+
+    chrome.permissions.onAdded.addListener(refreshPermList);
+    chrome.permissions.onRemoved.addListener(refreshPermList);
+    refreshPermList();
 });
