@@ -26,9 +26,11 @@ Built for marketers, analysts, and engineers who need to verify that the data le
 - Capture Google Ads conversion requests in real time, listed as clickable cards
 - Pills show which identifiers each request carries (em, pn, fn0, ln0, …)
 - Hover reveals full names; click loads the `em` into the decoder
+- The small `i` icon on each card opens a detail view with **all** query and body parameters of that request — useful for telemetry fields like `gcs`, `gcd`, `gtm`, `dma`, `tag_exp`
 - Filter to show only requests with `em` payload (default on, hides telemetry pings)
 - Export captures as JSON for documentation or analysis
 - Permission requested per-site via the URL field — the extension only listens on origins you explicitly grant
+- Granted sites are listed in a collapsible **Permitted sites** block under the URL input; one click on `×` revokes a site (active recording is stopped first)
 
 ## Install
 
@@ -63,10 +65,11 @@ The extension icon opens a Side Panel — not a popup. The panel persists across
 1. In the EM Decoder tab, the URL field at the top should show the active tab's origin (otherwise click ↻ to refresh from the active tab)
 2. Click **Permit & Record** — Chrome asks for site access for that origin; allow it
 3. Trigger conversions / form submissions on the page being recorded
-4. Captures appear as cards below the EM input
-5. Click a card with `em` to load it into the decoder
+4. Captures appear as cards at the bottom of the panel
+5. Click a card with `em` to load it into the decoder; click the `i` icon to inspect all query and body parameters of that request
 6. **Export** copies the visible captures as JSON to clipboard
 7. **Clear** removes them; **Stop** ends recording
+8. To revoke site access, expand **Permitted sites** under the URL input and click `×` next to the entry
 
 The recording continues in the background even when the Side Panel is closed. It is automatically stopped when the browser restarts (so a forgotten recording doesn't run silently).
 
@@ -96,7 +99,7 @@ checkSetup()         // permissions, listener state, capture count
 recordingStatus()    // current recording flag and ringbuffer size
 getCaptures()        // console.table of current captures
 listOrigins()        // all granted origins (static + optional)
-revokeOrigin('https://example.com/*')
+revokeOrigin('https://example.com/*')         // also available via the Permitted sites UI
 revokeAllOptionalOrigins()
 lightTest()          // 30s diagnostic listener that logs every match
 ```

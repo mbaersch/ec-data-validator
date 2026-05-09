@@ -765,6 +765,14 @@ document.addEventListener('DOMContentLoaded', () => {
       'https://www.google.com/pagead/*',
       'https://www.google.com/ccm/*'
     ]);
+    // Chrome kollabiert die 4 Manifest-Patterns oft zu breiteren Forms:
+    //   "https://*.googleadservices.com/*"  und  "https://www.google.com/*"
+    // Daher matchen wir am Host, nicht am exakten Pattern.
+    function isStaticOrigin(o) {
+      if (STATIC_ORIGINS.has(o)) return true;
+      return /\/\/(\*\.)?googleadservices\.com\//.test(o)
+          || /\/\/www\.google\.com\//.test(o);
+    }
 
     const permDetails = document.getElementById('permDetails');
     const permCount   = document.getElementById('permCount');
@@ -772,7 +780,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function refreshPermList() {
       const perms = await chrome.permissions.getAll();
-      const optional = (perms.origins || []).filter(o => !STATIC_ORIGINS.has(o));
+      const optional = (perms.origins || []).filter(o => !isStaticOrigin(o));
       permCount.textContent = String(optional.length);
       if (optional.length === 0) {
         permDetails.setAttribute('disabled', '');
