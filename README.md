@@ -88,9 +88,6 @@ The codebase is small and unbundled — no build step. Edit, reload the extensio
 - `manifest.json` — MV3 config
 - `background.js` — service worker, handles recording and the message API
 - `popup.html` / `popup.js` — Side Panel UI
-- `test-page/ectest.html` — a static test page that fires GTM events with toggleable hash modes; useful for end-to-end testing
-- `ressources/ec-ploginfo.md` — research notes on Enhanced Conversions behavior, accumulated through real-world testing
-- `AGENTS.md` — architecture notes for future contributors / agents
 
 For diagnostic helpers in the service worker console (`chrome://extensions/` → click "Service worker"):
 
