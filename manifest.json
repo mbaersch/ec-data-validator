@@ -1,0 +1,37 @@
+{
+  "manifest_version": 3,
+  "name": "Enhanced Conversion Data Validator",
+  "version": "2.0",
+  "action": {
+    "default_title": "Open Validator",
+    "default_icon": {
+      "16": "icon-16.png",
+      "32": "icon-32.png",
+      "48": "icon-48.png",
+      "128": "icon-128.png"
+    }
+  },
+  "icons": {
+    "16": "icon-16.png",
+    "32": "icon-32.png",
+    "48": "icon-48.png",
+    "128": "icon-128.png"
+  },
+  "side_panel": {
+    "default_path": "popup.html"
+  },
+  "permissions": ["storage", "sidePanel", "webRequest", "tabs"],
+  "host_permissions": [
+    "https://*.googleadservices.com/pagead/*",
+    "https://*.googleadservices.com/ccm/*",
+    "https://www.google.com/pagead/*",
+    "https://www.google.com/ccm/*"
+  ],
+  "optional_host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "minimum_chrome_version": "114"
+}

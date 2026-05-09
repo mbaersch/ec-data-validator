@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    :root {
+      --primary: #C44E00;
+      --secondary: #005141;
+      --bg: #f8fafc;
+      --text: #1e293b;
+      --border: #e2e8f0;
+    }
+    body { width: 100%; min-width: 320px; font-family: 'Segoe UI', system-ui, sans-serif; margin: 0; background: var(--bg); color: var(--text); min-height: 100vh; }
+    .tabs { display: flex; background: #202124; position: sticky; top: 0; z-index: 100; }
+    .tab { flex: 1; padding: 12px; text-align: center; color: #9aa0a6; cursor: pointer; font-size: 13px; font-weight: bold; transition: 0.2s; border-bottom: 3px solid transparent; }
+    .tab.active { color: white; border-bottom-color: var(--primary); background: #292a2d; }
+    .content { padding: 15px; display: none; }
+    .content.active { display: block; }
+    
+    .input-group { margin-bottom: 15px; }
+    label { display: block; font-size: 10px; color: #64748b; text-transform: uppercase; margin-bottom: 5px; font-weight: 700; letter-spacing: 0.5px; }
+    textarea { width: 100%; height: 130px; box-sizing: border-box; border: 1px solid var(--border); border-radius: 6px; padding: 10px; font-family: 'Fira Code', 'Consolas', monospace; font-size: 11px; resize: none; background: #fff; transition: border-color 0.2s; }
+    textarea:focus { outline: none; border-color: var(--primary); }
+    
+    .verification-box { margin: 15px; background: white; padding: 15px; border-radius: 12px; border: 1px solid var(--border); box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); }
+    .verification-box.hidden { display: none; }
+    .v-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    input { width: 100%; padding: 8px 12px; margin-bottom: 8px; border: 1px solid var(--border); border-radius: 6px; box-sizing: border-box; font-size: 12px; }
+    input:focus { outline: none; border-color: var(--secondary); }
+    
+    .res-table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 11px; background: white; border-radius: 8px; overflow: hidden; border: 1px solid var(--border); }
+    .res-table td { padding: 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+    .res-table td:first-child { white-space: nowrap; padding-right: 14px; width: 1px; }
+    .res-table td:nth-child(2) { word-break: break-all; }
+    .res-table td:nth-child(2) code { word-break: break-all; }
+    .res-table tr:last-child td { border-bottom: none; }
+    .res-table b { color: #475569; }
+    .status-line { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+    
+    .match { color: white; font-weight: bold; background: var(--secondary); padding: 2px 6px; border-radius: 4px; font-size: 9px; }
+    .no-match { color: white; font-weight: bold; background: #dc2626; padding: 2px 6px; border-radius: 4px; font-size: 9px; }
+    .enc { font-weight: 700; padding: 2px 6px; border-radius: 4px; font-size: 9px; letter-spacing: 0.3px; text-transform: uppercase; }
+    .enc-hex { background: #dbeafe; color: #1e40af; }
+    .enc-b64url { background: #fef3c7; color: #92400e; }
+    .status-info { font-size: 10px; color: #94a3b8; margin-top: 10px; text-align: center; }
+    
+    code { background: #f1f5f9; padding: 2px 4px; border-radius: 3px; color: var(--primary); }
+
+    .intro { font-size: 12px; color: var(--muted); margin: 0 0 12px; line-height: 1.45; }
+    .intro p { margin: 0 0 4px; }
+    .intro details { margin-top: 4px; }
+    .intro details summary { cursor: pointer; color: var(--secondary); font-weight: 600; font-size: 11px; user-select: none; outline: none; list-style-position: inside; }
+    .intro details summary:hover { color: var(--primary); }
+    .intro details[open] summary { margin-bottom: 6px; }
+    .intro details ul { margin: 0; padding-left: 18px; }
+    .intro details li { margin-bottom: 4px; }
+    .intro details code { font-size: 11px; }
+
+    .rec-card { background: #fff; border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin: 0 0 12px; }
+    .rec-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+    .rec-row input[type="text"] { flex: 1 1 200px; min-width: 0; margin: 0; padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 12px; }
+    .rec-row button { font-size: 11px; padding: 6px 10px; border: 1px solid var(--border); background: #fff; color: var(--text); border-radius: 6px; cursor: pointer; font-weight: 600; }
+    .rec-row button:hover { border-color: var(--primary); color: var(--primary); }
+    .rec-row button.primary { background: var(--primary); color: #fff; border-color: var(--primary); }
+    .rec-row button.primary:hover { filter: brightness(1.05); color: #fff; }
+    .rec-row button.danger { color: #991b1b; }
+    .rec-row button.icon-btn { padding: 6px 8px; font-size: 14px; line-height: 1; flex: 0 0 auto; }
+    .rec-row button.icon-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .rec-status { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); }
+    .rec-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #cbd5e1; }
+    .rec-dot.live { background: #dc2626; box-shadow: 0 0 0 0 rgba(220,38,38,0.5); animation: rec-pulse 1.5s infinite; }
+    @keyframes rec-pulse { 0% { box-shadow: 0 0 0 0 rgba(220,38,38,0.5); } 70% { box-shadow: 0 0 0 6px rgba(220,38,38,0); } 100% { box-shadow: 0 0 0 0 rgba(220,38,38,0); } }
+    .rec-error { font-size: 11px; color: #991b1b; margin-top: 6px; }
+    .rec-filter { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); cursor: pointer; user-select: none; }
+    .rec-filter input { width: 14px; height: 14px; margin: 0; accent-color: var(--primary); cursor: pointer; }
+    .rec-filter code { font-size: 11px; }
+
+    .cap-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; margin-top: 12px; }
+    .cap-list[hidden] { display: none; }
+    .cap-card { background: #fff; border: 1px solid var(--border); border-radius: 8px; padding: 9px 10px; cursor: pointer; transition: border-color 0.1s, background-color 0.1s; }
+    .cap-card:hover { border-color: var(--primary); background: #fef9f4; }
+    .cap-card.no-em { opacity: 0.55; cursor: default; }
+    .cap-card.no-em:hover { background: #fff; border-color: var(--border); }
+    .cap-card-head { display: flex; gap: 6px; align-items: baseline; font-family: 'Fira Code', 'Consolas', monospace; font-size: 10px; color: var(--muted); margin-bottom: 6px; flex-wrap: wrap; }
+    .cap-time { color: var(--text); }
+    .cap-method { font-weight: 700; color: var(--secondary); font-size: 9px; }
+    .cap-host { flex: 1 1 100%; word-break: break-all; min-width: 0; line-height: 1.3; }
+    .cap-card-pills { display: flex; gap: 3px; flex-wrap: wrap; }
+    .cap-pill { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.3px; padding: 2px 6px; border-radius: 10px; background: #d1fae5; color: #065f46; white-space: nowrap; cursor: help; }
+    .cap-pill.identifier-em    { background: #dbeafe; color: #1e40af; }
+    .cap-pill.identifier-pn    { background: #ede9fe; color: #5b21b6; }
+    .cap-pill.identifier-name  { background: #fce7f3; color: #9d174d; }
+    .cap-pill.identifier-addr  { background: #fef3c7; color: #92400e; }
+    .cap-pill.none { background: #f1f5f9; color: #94a3b8; }
+    .cap-empty { text-align: center; padding: 16px; color: var(--muted); font-size: 11px; font-style: italic; }
+
+    .footer { margin-top: 8px; padding: 10px 15px; border-top: 1px solid var(--border); text-align: center; font-size: 10px; color: #94a3b8; background: #fff; }
+    .footer a { color: var(--secondary); text-decoration: none; font-weight: 600; }
+    .footer a:hover { color: var(--primary); text-decoration: underline; }
+  </style>
+</head>
+<body>
+
+<div class="tabs">
+  <div class="tab active" data-target="tab-em">EM Decoder</div>
+  <div class="tab" data-target="tab-obj">Object Analysis</div>
+</div>
+
+<div id="tab-em" class="content active">
+  <div class="intro">
+    <p>Decode and validate the <code>em</code> parameter from a Google Ads conversion request.</p>
+    <details>
+      <summary>Show more</summary>
+      <ul>
+        <li>Paste the full <code>em=…</code> value from Google Tag Assistant or the Network tab (with or without the <code>em=</code> prefix). Format: <code>tv.1~em.HASH~pn.HASH~…</code></li>
+        <li>Tokens: <code>em</code> email, <code>pn</code> phone, <code>fn0</code>/<code>ln0</code> first/last name, <code>sa0</code> street, <code>ct0</code>/<code>st0</code>/<code>zp0</code>/<code>co0</code> city/state/zip/country.</li>
+        <li>The <strong>HEX</strong>/<strong>B64URL</strong> pill marks the hash encoding — auto-detection sends Base64URL, manually provided <code>sha256_*</code> values are Hex.</li>
+        <li>Fill the optional "verify fields" below with plaintext — values are hashed in both encodings and matched against each token (<code>MATCH</code>/<code>ERR</code>).</li>
+      </ul>
+    </details>
+  </div>
+  <div class="rec-card">
+    <div class="rec-row">
+      <input type="text" id="recUrl" placeholder="https://example.com/* (origin to monitor)">
+      <button id="recUrlReload" class="icon-btn" title="Reload from active tab" aria-label="Reload URL from active tab">↻</button>
+      <button id="recToggle" class="primary">Permit &amp; Record</button>
+    </div>
+    <div class="rec-row" style="margin-top:8px; justify-content:space-between;">
+      <span class="rec-status"><span id="recDot" class="rec-dot"></span><span id="recStatusText">idle</span></span>
+      <span class="rec-status"><span id="recCount">0</span><span>/<span id="recRing">50</span> captures</span></span>
+      <button id="recExport" title="Copy captures as JSON to clipboard">Export</button>
+      <button id="recClear" class="danger">Clear</button>
+    </div>
+    <div class="rec-row" style="margin-top:6px;">
+      <label class="rec-filter">
+        <input type="checkbox" id="recFilterEm" checked>
+        Show only requests with <code>em</code>
+      </label>
+    </div>
+    <div id="recError" class="rec-error" hidden></div>
+  </div>
+
+  <div class="input-group">
+    <label>Google Ads "em" Parameter</label>
+    <textarea id="emInput" placeholder="tv.1~em.hash~pn.hash..."></textarea>
+  </div>
+  <div id="emResult"></div>
+
+  <div id="capList" class="cap-list" hidden></div>
+  <div id="capEmpty" class="cap-empty">No captures yet — start recording to collect requests.</div>
+</div>
+
+<div id="tab-obj" class="content">
+  <div class="intro">
+    <p>Inspect a <code>user_data</code> object from <code>dataLayer.push</code>, <code>gtag()</code>, or raw JSON.</p>
+    <details>
+      <summary>Show more</summary>
+      <ul>
+        <li>Paste a <code>dataLayer.push({…})</code> call, a <code>gtag('event', '…', {…})</code> call, or just the <code>{…}</code> object. JS-style syntax (unquoted keys, single quotes) is normalized automatically. You can also just paste the user-rovided-data variable content from Google Tag Assistant. </li>
+        <li>Address fields (<code>first_name</code>, <code>last_name</code>, <code>country</code>, <code>postal_code</code>, <code>street</code>, <code>city</code>, <code>region</code> incl. their <code>sha256_*</code> variants) must sit inside <code>user_data.address</code> — flat placement triggers a structure error.</li>
+        <li>Compliance pill: <strong>green</strong> = Email or full address present · <strong>grey</strong> = only Postal Code missing (still processed) · <strong>yellow</strong> = warning, fields likely insufficient for matching.</li>
+        <li>The <strong>HEX</strong>/<strong>B64URL</strong> pill marks each <code>sha256_*</code> hash encoding — manually pre-hashed values are usually Hex.</li>
+      </ul>
+    </details>
+  </div>
+  <div class="input-group">
+    <label>JSON / JS Literal Payload</label>
+    <textarea id="objInput" placeholder="{ user_data: { sha256_email_address: '...' } }"></textarea>
+  </div>
+  <div id="objResult"></div>
+</div>
+
+<div id="vBox" class="verification-box hidden">
+  <label>Verification (Plain Text for Match-Check)</label>
+  <div id="vGrid" class="v-grid"></div>
+  <div class="status-info">Fields appear automatically when matching hashes are found in the payload.</div>
+</div>
+
+<div class="footer">
+  <a href="https://www.markus-baersch.de" target="_blank" rel="noopener noreferrer">Markus Baersch</a>
+  <span style="opacity:0.5;"> | </span>
+  <a href="https://www.markus-baersch.de" target="_blank" rel="noopener noreferrer">www.markus-baersch.de</a>
+</div>
+
+<script src="popup.js"></script>
+</body>
+</html>

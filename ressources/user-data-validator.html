@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <title>GTM User Data Ultimate Validator</title>
+    <style>
+        body { font-family: 'Segoe UI', system-ui, sans-serif; line-height: 1.5; max-width: 1200px; margin: 20px auto; background: #f8fafc; color: #1e293b; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        section { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); border: 1px solid #e2e8f0; }
+        section + section { margin-top: 20px; }
+        textarea { width: 100%; height: 250px; font-family: 'Fira Code', monospace; font-size: 12px; margin-top: 8px; padding: 12px; box-sizing: border-box; border: 1px solid #cbd5e0; border-radius: 6px; }
+        .field-group { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-top: 10px; }
+        input { width: 100%; padding: 8px 12px; border: 1px solid #cbd5e0; border-radius: 6px; font-size: 13px; box-sizing: border-box; }
+        .result { margin-top: 15px; padding: 12px; border-radius: 6px; font-size: 0.9em; min-height: 50px; }
+        .success { background: #f0fdf4; border: 1px solid #bbf7d0; color: #166534; }
+        .error { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; }
+        .hidden { display: none; }
+        h2 { font-size: 1.1rem; margin: 0 0 10px 0; display: flex; justify-content: space-between; align-items: center; }
+        .tag { font-size: 10px; background: #e2e8f0; padding: 2px 6px; border-radius: 4px; }
+        label { font-size: 11px; font-weight: 600; color: #64748b; text-transform: uppercase; }
+        pre { background: #0f172a; color: #f8fafc; padding: 12px; border-radius: 6px; overflow-x: auto; font-size: 12px; }
+        code { color: #38bdf8; }
+        .match-badge { font-weight: bold; font-family: monospace; }
+    </style>
+</head>
+<body>
+
+<header style="text-align:center; margin-bottom: 20px;">
+    <h1>GTM User Data Validator Pro</h1>
+    <p>Validierung von JSON/JS-Literals & Google Ads EM-Payloads</p>
+</header>
+
+<div class="grid">
+    <section>
+        <h2>Objekt-Analyse <span class="tag">JSON / JS-Literal</span></h2>
+        <label>Payload (aus Tag Assistant / dataLayer)</label>
+        <textarea id="jsonInput" placeholder="Hier user_data Objekt einfügen..."></textarea>
+        <div id="jsonFeedback" class="result"></div>
+    </section>
+
+    <section>
+        <h2>EM-String Decoder <span class="tag">Ads URL Param</span></h2>
+        <label>Inhalt des "em" Parameters</label>
+        <textarea id="emInput" placeholder="tv.1~em.hash~pn.hash..."></textarea>
+        <div id="emFeedback" class="result"></div>
+    </section>
+</div>
+
+<section id="verifySection" class="hidden">
+    <h2>Vergleichswerte <span class="tag">Klartext für Hash-Check</span></h2>
+    <p style="font-size: 11px; color: #94a3b8; margin: 0 0 10px;">Felder erscheinen automatisch, sobald der zugehörige Hash im Payload gefunden wurde.</p>
+    <div id="verifyContainer" class="field-group"></div>
+</section>
+
+<script>
+    const storageKey = 'gtm_validator_data';
+    const jsonInput = document.getElementById('jsonInput');
+    const emInput = document.getElementById('emInput');
+    const verifySection = document.getElementById('verifySection');
+    const verifyContainer = document.getElementById('verifyContainer');
+
+    // Felder, die bei Google EC standardmässig als Hash auftreten können
+    const verifyFields = [
+        { id: 'v_email',  label: 'E-Mail',        hashKeys: ['sha256_email_address', 'em'] },
+        { id: 'v_phone',  label: 'Phone (E.164)', hashKeys: ['sha256_phone_number', 'pn'], normalize: v => v.replace(/\s+/g, '') },
+        { id: 'v_fn',     label: 'Vorname',       hashKeys: ['sha256_first_name', 'fn0'] },
+        { id: 'v_ln',     label: 'Nachname',      hashKeys: ['sha256_last_name', 'ln0'] },
+        { id: 'v_street', label: 'Street',        hashKeys: ['sha256_street', 'sa0'] }
+    ];
+    const hashKeyToVerifyId = {};
+    verifyFields.forEach(f => f.hashKeys.forEach(k => { hashKeyToVerifyId[k] = f.id; }));
+
+    // Felder, die im Objekt-Report angezeigt werden (auch unhashed)
+    const reportFields = [
+        'email', 'sha256_email_address',
+        'phone_number', 'sha256_phone_number',
+        'first_name', 'sha256_first_name',
+        'last_name', 'sha256_last_name',
+        'street', 'city', 'region', 'postal_code', 'country'
+    ];
+
+    let verifyState = {};
+    let lastVisibleSig = '';
+
+    function loadState() {
+        const saved = localStorage.getItem(storageKey);
+        if (!saved) return;
+        try {
+            const data = JSON.parse(saved);
+            jsonInput.value = data.json || '';
+            emInput.value = data.em || '';
+            verifyState = data.verify || {};
+            // Migration alter Schluessel (p_email -> v_email etc.)
+            if (data.plain) {
+                const legacyMap = { p_email: 'v_email', p_phone: 'v_phone', p_fn: 'v_fn', p_ln: 'v_ln' };
+                Object.entries(legacyMap).forEach(([oldK, newK]) => {
+                    if (data.plain[oldK] && !verifyState[newK]) verifyState[newK] = data.plain[oldK];
+                });
+            }
+        } catch (e) { /* ignore corrupt storage */ }
+    }
+
+    function saveState() {
+        localStorage.setItem(storageKey, JSON.stringify({
+            json: jsonInput.value,
+            em: emInput.value,
+            verify: verifyState
+        }));
+    }
+
+    function normalizeJSObject(str) {
+        let cleaned = str.trim();
+        if (cleaned.includes('dataLayer.push(')) {
+            cleaned = cleaned.substring(cleaned.indexOf('(') + 1, cleaned.lastIndexOf(')'));
+        }
+        cleaned = cleaned.trim();
+        // Fragment ohne aussere Klammern (z.B. "email: 'a@b.de'") in {} packen
+        if (!cleaned.startsWith('{') && !cleaned.startsWith('[')) {
+            cleaned = '{' + cleaned + '}';
+        }
+        return cleaned
+            .replace(/"\s*\+\s*"/g, '')                          // Konkat: "ab" + "cd" -> "abcd"
+            .replace(/'\s*\+\s*'/g, '')                          // Konkat: 'ab' + 'cd' -> 'abcd'
+            .replace(/([{,])\s*([a-zA-Z0-9_]+)\s*:/g, '$1"$2":') // unquoted keys
+            .replace(/,\s*([\]}])/g, '$1')                       // trailing commas
+            .replace(/'/g, '"');
+    }
+
+    async function sha256(msg) {
+        if (!msg) return null;
+        const buf = new TextEncoder().encode(msg.toLowerCase().trim());
+        const hash = await crypto.subtle.digest('SHA-256', buf);
+        return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+
+    function getEMKeys(raw) {
+        const keys = new Set();
+        if (!raw) return keys;
+        let s = raw.trim();
+        try { s = decodeURIComponent(s); } catch (e) { /* keep raw */ }
+        if (s.startsWith('em=')) s = s.substring(3);
+        s.split('~').forEach(p => {
+            const i = p.indexOf('.');
+            if (i !== -1) keys.add(p.substring(0, i));
+        });
+        return keys;
+    }
+
+    function parseObj(raw) {
+        if (!raw.trim()) return null;
+        try { return JSON.parse(normalizeJSObject(raw)); } catch (e) { return undefined; }
+    }
+
+    function collectObjKeys(obj, keys = new Set()) {
+        if (!obj || typeof obj !== 'object') return keys;
+        Object.keys(obj).forEach(k => {
+            keys.add(k);
+            if (obj[k] && typeof obj[k] === 'object') collectObjKeys(obj[k], keys);
+        });
+        return keys;
+    }
+
+    function checkMinReq(keys) {
+        const has = (...alts) => alts.some(k => keys.has(k));
+        const r = {
+            email:   has('email', 'sha256_email_address', 'em'),
+            phone:   has('phone_number', 'sha256_phone_number', 'pn'),
+            fn:      has('first_name', 'sha256_first_name', 'fn0'),
+            ln:      has('last_name', 'sha256_last_name', 'ln0'),
+            zip:     has('postal_code', 'zp0'),
+            country: has('country', 'co0'),
+            any:     keys.size > 0
+        };
+        r.fullAddr = r.fn && r.ln && r.zip && r.country;
+        r.ok = r.email || r.fullAddr;
+        return r;
+    }
+
+    function renderCompliance(c) {
+        if (!c.any) return '';
+        if (c.ok) {
+            const path = c.email && c.fullAddr ? 'E-Mail + vollständige Anschrift'
+                       : c.email ? 'E-Mail'
+                       : 'vollständige Anschrift';
+            return `<div style="margin-bottom:10px; padding:6px 10px; background:#dcfce7; color:#166534; border-radius:4px; font-size:11px;">✓ Mindestanforderung erfüllt (${path})${c.phone ? ' · Phone als zusätzlicher Identifier' : ''}</div>`;
+        }
+        const missing = [];
+        if (!c.email) missing.push('E-Mail');
+        if (!c.fullAddr) {
+            const parts = [];
+            if (!c.fn) parts.push('Vorname');
+            if (!c.ln) parts.push('Nachname');
+            if (!c.zip) parts.push('PLZ');
+            if (!c.country) parts.push('Land');
+            missing.push(parts.length ? `vollständige Anschrift (fehlt: ${parts.join(', ')})` : 'vollständige Anschrift');
+        }
+        const phoneHint = c.phone ? ' · Phone allein reicht laut Doku nicht' : '';
+        return `<div style="margin-bottom:10px; padding:6px 10px; background:#fef2f2; color:#991b1b; border-radius:4px; font-size:11px;">✗ Mindestanforderung nicht erfüllt — benötigt: ${missing.join(' ODER ')}${phoneHint}</div>`;
+    }
+
+    function countryWarning(val) {
+        if (val === undefined || val === null || val === '') return '';
+        return /^[A-Za-z]{2}$/.test(String(val).trim())
+            ? ''
+            : ` <span class='match-badge' style='color:#c2410c'>[!] ISO-3166-1 alpha-2 erwartet (z.B. CH, DE)</span>`;
+    }
+
+    function getObjValue(obj, key) {
+        if (!obj) return undefined;
+        if (obj[key] !== undefined) return obj[key];
+        const unpackAddr = (a) => Array.isArray(a) ? a[0] : a;
+        if (obj.user_data) {
+            if (obj.user_data[key] !== undefined) return obj.user_data[key];
+            const udAddr = unpackAddr(obj.user_data.address);
+            if (udAddr && udAddr[key] !== undefined) return udAddr[key];
+        }
+        const addr = unpackAddr(obj.address);
+        if (addr && addr[key] !== undefined) return addr[key];
+        return undefined;
+    }
+
+    function detectObjType(parsed) {
+        if (!parsed || typeof parsed !== 'object') return null;
+        const hasTagMode = (o) => {
+            if (!o || typeof o !== 'object') return false;
+            if (Object.prototype.hasOwnProperty.call(o, '_tag_mode')) return true;
+            return Object.values(o).some(v => hasTagMode(v));
+        };
+        return hasTagMode(parsed) ? 'user-provided data' : 'dataLayer / object';
+    }
+
+    function renderTypePill(type) {
+        if (!type) return '';
+        const isUPD = type === 'user-provided data';
+        const bg = isUPD ? '#fef3c7' : '#dbeafe';
+        const fg = isUPD ? '#92400e' : '#1e40af';
+        return `<div style="margin-bottom:8px;"><span style="font-size:10px; padding:3px 8px; border-radius:4px; background:${bg}; color:${fg}; font-weight:600; letter-spacing:0.3px;">${type}</span></div>`;
+    }
+
+    function renderVerifyFields(activeKeys) {
+        const visible = verifyFields.filter(f => f.hashKeys.some(k => activeKeys.has(k)));
+        const sig = visible.map(f => f.id).join(',');
+
+        if (visible.length === 0) {
+            verifySection.classList.add('hidden');
+            lastVisibleSig = '';
+            return;
+        }
+        verifySection.classList.remove('hidden');
+
+        if (sig === lastVisibleSig) return;
+        lastVisibleSig = sig;
+
+        verifyContainer.innerHTML = visible.map(f => `
+            <div>
+                <label>${f.label}</label>
+                <input type="text" id="${f.id}" data-verify="1" value="${(verifyState[f.id] || '').replace(/"/g, '&quot;')}">
+            </div>
+        `).join('');
+
+        verifyContainer.querySelectorAll('input[data-verify]').forEach(inp => {
+            inp.addEventListener('input', (e) => {
+                verifyState[e.target.id] = e.target.value;
+                saveState();
+                runUpdate();
+            });
+        });
+    }
+
+    async function renderEM(raw, hashes, emKeys) {
+        const feedback = document.getElementById('emFeedback');
+        if (!raw.trim()) { feedback.className = 'result'; feedback.innerHTML = ''; return; }
+
+        const mapping = {
+            'tv': 'Version', 'em': 'Email', 'pn': 'Phone',
+            'fn0': 'First Name', 'ln0': 'Last Name',
+            'co0': 'Country', 'ct0': 'City', 'st0': 'State', 'zp0': 'Zip', 'sa0': 'Street'
+        };
+
+        let s = raw.trim();
+        try { s = decodeURIComponent(s); } catch (e) { /* keep raw */ }
+        if (s.startsWith('em=')) s = s.substring(3);
+
+        const compliance = renderCompliance(checkMinReq(emKeys));
+        let html = compliance + '<strong>Decodierter EM-Payload:</strong><pre>';
+        s.split('~').forEach(p => {
+            const i = p.indexOf('.');
+            if (i === -1) return;
+            const k = p.substring(0, i), v = p.substring(i + 1);
+            const verifyId = hashKeyToVerifyId[k];
+            let badge = '';
+            if (verifyId && hashes[verifyId]) {
+                badge = (v.toLowerCase() === hashes[verifyId])
+                    ? " <span class='match-badge' style='color:#22c55e'>[MATCH]</span>"
+                    : " <span class='match-badge' style='color:#ef4444'>[NO MATCH]</span>";
+            }
+            if (k === 'co0') badge += countryWarning(v);
+            html += `<code>${(mapping[k] || k).padEnd(12)}</code>: ${v}${badge}\n`;
+        });
+        html += '</pre>';
+        feedback.className = 'result success';
+        feedback.innerHTML = html;
+    }
+
+    async function renderObj(parsed, raw, hashes, objKeys) {
+        const feedback = document.getElementById('jsonFeedback');
+        if (!raw.trim()) { feedback.className = 'result'; feedback.innerHTML = ''; return; }
+        if (parsed === undefined) {
+            feedback.className = 'result error';
+            feedback.innerHTML = 'Fehler beim Parsen des Objekts.';
+            return;
+        }
+
+        const typePill = renderTypePill(detectObjType(parsed));
+        const compliance = renderCompliance(checkMinReq(objKeys));
+        let html = typePill + compliance + "<strong>Gefundene Felder:</strong><table style='width:100%; font-size:11px; margin-top:8px;'>";
+        for (const field of reportFields) {
+            const val = getObjValue(parsed, field);
+            if (val === undefined) continue;
+            const verifyId = hashKeyToVerifyId[field];
+            let badge = '';
+            if (verifyId && hashes[verifyId]) {
+                badge = (String(val).toLowerCase() === hashes[verifyId])
+                    ? " <span class='match-badge' style='color:#22c55e'>[MATCH]</span>"
+                    : " <span class='match-badge' style='color:#ef4444'>[NO MATCH]</span>";
+            }
+            if (field === 'country') badge += countryWarning(val);
+            html += `<tr><td><b>${field}</b></td><td><code style="word-break:break-all;">${val}</code>${badge}</td></tr>`;
+        }
+        html += '</table>';
+        feedback.className = 'result success';
+        feedback.innerHTML = html;
+    }
+
+    async function runUpdate() {
+        saveState();
+
+        const emRaw = emInput.value;
+        const objRaw = jsonInput.value;
+
+        const emKeys = getEMKeys(emRaw);
+        const parsedObj = parseObj(objRaw);
+        const objKeys = parsedObj ? collectObjKeys(parsedObj) : new Set();
+        const activeKeys = new Set([...emKeys, ...objKeys]);
+
+        renderVerifyFields(activeKeys);
+
+        // Hashes der Klartextwerte vorberechnen
+        const hashes = {};
+        await Promise.all(verifyFields.map(async f => {
+            const val = verifyState[f.id];
+            if (!val) return;
+            const normalized = f.normalize ? f.normalize(val) : val;
+            hashes[f.id] = await sha256(normalized);
+        }));
+
+        await renderObj(parsedObj, objRaw, hashes, objKeys);
+        await renderEM(emRaw, hashes, emKeys);
+    }
+
+    window.addEventListener('load', () => {
+        loadState();
+        runUpdate();
+    });
+
+    jsonInput.addEventListener('input', runUpdate);
+    emInput.addEventListener('input', runUpdate);
+</script>
+
+</body>
+</html>
