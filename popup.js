@@ -1,9 +1,37 @@
 document.addEventListener('DOMContentLoaded', () => {
-    const fieldsMap = {
-        'tv': 'Version', 'em': 'Email Hash', 'pn': 'Phone Hash',
-        'fn0': 'First Name Hash', 'ln0': 'Last Name Hash',
-        'co0': 'Country', 'ct0': 'City', 'st0': 'State', 'zp0': 'Zip', 'sa0': 'Street Hash'
+    const TOKEN_BASE = {
+        tv: 'Version',
+        em: 'Email Hash',
+        pn: 'Phone Hash',
+        fn: 'First Name Hash',
+        ln: 'Last Name Hash',
+        sa: 'Street Hash',
+        ct: 'City',
+        st: 'State',
+        zp: 'Zip',
+        pc: 'Postal Code',
+        rg: 'Region',
+        co: 'Country'
     };
+
+    // tokenLabel('fn0',_,_)        -> 'First Name Hash'
+    // tokenLabel('fn1',_,_)        -> 'First Name Hash 2'
+    // tokenLabel('em', 1, 3)       -> 'Email Hash 2'   (un-indexed token, but several occurrences)
+    // tokenLabel('em', 0, 1)       -> 'Email Hash'
+    function tokenLabel(key, occIdx, occTotal) {
+        const m = key.match(/^([a-z]+)(\d+)?$/);
+        if (!m) return key;
+        const base = TOKEN_BASE[m[1]] || key;
+        if (m[2] !== undefined) {
+            const idx = parseInt(m[2], 10);
+            return idx > 0 ? `${base} ${idx + 1}` : base;
+        }
+        if (occTotal && occTotal > 1) return `${base} ${occIdx + 1}`;
+        return base;
+    }
+
+    function isHashToken(k)    { return /^(em|pn|fn|ln|sa)\d*$/.test(k); }
+    function isCountryToken(k) { return /^co\d*$/.test(k); }
 
     // Felder, die als Hash auftreten koennen -> Vergleichsfeld dynamisch
     const verifyFields = [
@@ -16,14 +44,19 @@ document.addEventListener('DOMContentLoaded', () => {
     const hashKeyToVerifyId = {};
     verifyFields.forEach(f => f.hashKeys.forEach(k => { hashKeyToVerifyId[k] = f.id; }));
 
-    // Felder fuer den Object-Report (auch unhashed)
-    const reportFields = [
-        'email', 'sha256_email_address',
-        'phone_number', 'sha256_phone_number',
-        'first_name', 'sha256_first_name',
-        'last_name', 'sha256_last_name',
-        'street', 'city', 'region', 'postal_code', 'country'
-    ];
+    // resolveVerifyId('fn0') -> 'v_fn'   resolveVerifyId('fn1') -> 'v_fn'
+    function resolveVerifyId(k) {
+        if (hashKeyToVerifyId[k]) return hashKeyToVerifyId[k];
+        const baseKey = k.replace(/\d+$/, '0');
+        if (baseKey !== k && hashKeyToVerifyId[baseKey]) return hashKeyToVerifyId[baseKey];
+        return null;
+    }
+
+    // Top-level identifier fields (multi-value via array supported)
+    const TOP_FIELDS  = ['email', 'sha256_email_address', 'phone_number', 'sha256_phone_number'];
+    // Per-address fields (rendered once per address element)
+    const ADDR_REPORT = ['first_name', 'sha256_first_name', 'last_name', 'sha256_last_name',
+                         'street', 'sha256_street', 'city', 'region', 'postal_code', 'country'];
 
     let verifyState = {};
     let lastVisibleSig = '';
@@ -229,18 +262,45 @@ document.addEventListener('DOMContentLoaded', () => {
             : ` <span style="background:#c2410c; color:white; padding:2px 6px; border-radius:4px; font-size:9px; font-weight:bold;" title="expected ISO-3166-1 alpha-2 (e.g. CH, DE)">[!] ISO-3166-1 alpha-2 (e.g. CH, DE)</span>`;
     }
 
-    function getObjValue(obj, key) {
-        if (!obj) return undefined;
-        if (obj[key] !== undefined) return obj[key];
-        const unpackAddr = (a) => Array.isArray(a) ? a[0] : a;
-        if (obj.user_data) {
-            if (obj.user_data[key] !== undefined) return obj.user_data[key];
-            const udAddr = unpackAddr(obj.user_data.address);
-            if (udAddr && udAddr[key] !== undefined) return udAddr[key];
+    // Top-level field values (email/phone) — flattens arrays so multi-value
+    // payloads (e.g. sha256_email_address: ['a','b']) yield separate rows.
+    function getObjFieldValues(obj, key) {
+        const out = [];
+        if (!obj || typeof obj !== 'object') return out;
+        const flatten = (v) => Array.isArray(v) ? v : [v];
+        if (obj[key] !== undefined) flatten(obj[key]).forEach(v => out.push(v));
+        if (obj.user_data && obj.user_data !== obj && obj.user_data[key] !== undefined) {
+            flatten(obj.user_data[key]).forEach(v => out.push(v));
         }
-        const addr = unpackAddr(obj.address);
-        if (addr && addr[key] !== undefined) return addr[key];
-        return undefined;
+        return out;
+    }
+
+    // Returns address objects from user_data.address or top-level address.
+    // Both `address: {...}` and `address: [{...},{...}]` are normalized to an array.
+    function collectAddresses(parsed) {
+        if (!parsed || typeof parsed !== 'object') return [];
+        const flatten = (v) => Array.isArray(v) ? v : [v];
+        const src = (parsed.user_data && parsed.user_data.address !== undefined)
+            ? parsed.user_data.address
+            : (parsed.address !== undefined ? parsed.address : null);
+        if (src === null) return [];
+        return flatten(src).filter(a => a && typeof a === 'object' && !Array.isArray(a));
+    }
+
+    function renderObjRow(field, val, hashes, idx, total) {
+        const verifyId = hashKeyToVerifyId[field];
+        const enc = field.startsWith('sha256_') ? detectHashEncoding(String(val)) : null;
+        let status = '';
+        if (verifyId && hashes[verifyId]) {
+            status = hashMatches(String(val), hashes[verifyId])
+                ? '<span class="match">MATCH</span>'
+                : '<span class="no-match">ERR</span>';
+        }
+        status += encPill(enc);
+        if (field === 'country') status += countryWarning(val);
+        const statusBlock = status.trim() ? `<div class="status-line">${status}</div>` : '';
+        const labelSuffix = total > 1 ? ` ${idx + 1}` : '';
+        return `<tr><td><b>${field}${labelSuffix}</b></td><td><code>${val}</code>${statusBlock}</td></tr>`;
     }
 
     function detectObjType(parsed) {
@@ -262,7 +322,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function renderVerifyFields(activeKeys) {
-        const visible = verifyFields.filter(f => f.hashKeys.some(k => activeKeys.has(k)));
+        const visible = verifyFields.filter(f => {
+            for (const ak of activeKeys) {
+                if (resolveVerifyId(ak) === f.id) return true;
+            }
+            return false;
+        });
         const sig = visible.map(f => f.id).join(',');
 
         if (visible.length === 0) {
@@ -300,14 +365,25 @@ document.addEventListener('DOMContentLoaded', () => {
         if (s.startsWith('em=')) s = s.substring(3);
 
         const compliance = renderCompliance(checkMinReq(emKeys));
-        let html = compliance + '<table class="res-table">';
+
+        // Parse all tokens first so duplicates (e.g. multiple `em.` for several
+        // emails) can be numbered consistently in the label column.
+        const tokens = [];
         s.split('~').forEach(p => {
             const i = p.indexOf('.');
             if (i === -1) return;
-            const k = p.substring(0, i), v = p.substring(i + 1);
-            const verifyId = hashKeyToVerifyId[k];
-            const enc = (verifyId || k === 'em' || k === 'pn' || k === 'fn0' || k === 'ln0' || k === 'sa0')
-                ? detectHashEncoding(v) : null;
+            tokens.push({ k: p.substring(0, i), v: p.substring(i + 1) });
+        });
+        const tokenTotal = {};
+        tokens.forEach(t => { tokenTotal[t.k] = (tokenTotal[t.k] || 0) + 1; });
+        const tokenSeen = {};
+
+        let html = compliance + '<table class="res-table">';
+        tokens.forEach(t => {
+            const k = t.k, v = t.v;
+            tokenSeen[k] = (tokenSeen[k] || 0) + 1;
+            const verifyId = resolveVerifyId(k);
+            const enc = isHashToken(k) ? detectHashEncoding(v) : null;
             let status = '';
             if (verifyId && hashes[verifyId]) {
                 status = hashMatches(v, hashes[verifyId])
@@ -315,9 +391,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     : '<span class="no-match">ERR</span>';
             }
             status += encPill(enc);
-            if (k === 'co0') status += countryWarning(v);
+            if (isCountryToken(k)) status += countryWarning(v);
             const statusBlock = status.trim() ? `<div class="status-line">${status}</div>` : '';
-            html += `<tr><td><b>${fieldsMap[k] || k}</b></td><td><code>${v}</code>${statusBlock}</td></tr>`;
+            const label = tokenLabel(k, tokenSeen[k] - 1, tokenTotal[k]);
+            html += `<tr><td><b>${label}</b></td><td><code>${v}</code>${statusBlock}</td></tr>`;
         });
         html += '</table>';
         target.innerHTML = html;
@@ -338,24 +415,35 @@ document.addEventListener('DOMContentLoaded', () => {
         const structWarn = misplaced.length > 0
             ? `<div style="${struct}">✗ Structure error — address fields outside <code>user_data.address</code>: ${misplaced.join(', ')}</div>`
             : '';
-        let html = typePill + structWarn + compliance + '<table class="res-table">';
-        reportFields.forEach(f => {
-            const val = getObjValue(parsed, f);
-            if (val === undefined || val === null) return;
-            const verifyId = hashKeyToVerifyId[f];
-            const enc = f.startsWith('sha256_') ? detectHashEncoding(String(val)) : null;
-            let status = '';
-            if (verifyId && hashes[verifyId]) {
-                status = hashMatches(String(val), hashes[verifyId])
-                    ? '<span class="match">MATCH</span>'
-                    : '<span class="no-match">ERR</span>';
-            }
-            status += encPill(enc);
-            if (f === 'country') status += countryWarning(val);
-            const statusBlock = status.trim() ? `<div class="status-line">${status}</div>` : '';
-            html += `<tr><td><b>${f}</b></td><td><code>${val}</code>${statusBlock}</td></tr>`;
+        let html = typePill + structWarn + compliance;
+
+        // 1) Top-level identifiers (email/phone) — multi-value via array supported
+        let topRows = '';
+        TOP_FIELDS.forEach(f => {
+            const vals = getObjFieldValues(parsed, f);
+            vals.forEach((v, i) => {
+                if (v === undefined || v === null) return;
+                topRows += renderObjRow(f, v, hashes, i, vals.length);
+            });
         });
-        html += '</table>';
+        if (topRows) html += '<table class="res-table">' + topRows + '</table>';
+
+        // 2) Addresses — render each as own block when multiple
+        const addresses = collectAddresses(parsed);
+        addresses.forEach((addr, idx) => {
+            let rows = '';
+            ADDR_REPORT.forEach(f => {
+                const v = addr[f];
+                if (v === undefined || v === null) return;
+                rows += renderObjRow(f, v, hashes, 0, 1);
+            });
+            if (!rows) return;
+            const heading = addresses.length > 1
+                ? `<h3 style="font-size:11px;text-transform:uppercase;letter-spacing:0.5px;color:#64748b;margin:14px 0 6px;">Address ${idx + 1}</h3>`
+                : '';
+            html += heading + '<table class="res-table">' + rows + '</table>';
+        });
+
         target.innerHTML = html;
     }
 
@@ -476,14 +564,45 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function renderPills(em) {
         if (!em) return '<span class="cap-pill none" title="No em parameter in this request">no em</span>';
-        const keys = getEMKeys(em);
+
+        // Count occurrences per token (handles e.g. 3× `em.HASH`) and detect
+        // additional addresses via the highest indexed address token (fn1, ln1, ...).
+        const counts = {};
+        let s = em.trim();
+        try { s = decodeURIComponent(s); } catch (e) { /* ignore */ }
+        if (s.startsWith('em=')) s = s.substring(3);
+        s.split('~').forEach(p => {
+            const i = p.indexOf('.');
+            if (i === -1) return;
+            const k = p.substring(0, i);
+            counts[k] = (counts[k] || 0) + 1;
+        });
+        const keys = new Set(Object.keys(counts));
         const ordered = PILL_ORDER.filter(k => keys.has(k));
         if (ordered.length === 0) return '<span class="cap-pill none" title="em present but no recognized identifier tokens">no identifiers</span>';
-        return ordered.map(k => {
+
+        let addrCount = 1;
+        for (const k of keys) {
+            const m = k.match(/^(fn|ln|sa|ct|st|zp|pc|rg|co)(\d+)$/);
+            if (m) addrCount = Math.max(addrCount, parseInt(m[2], 10) + 1);
+        }
+
+        const pills = ordered.map(k => {
             const cls = PILL_CLASS[k] || '';
             const label = PILL_LABEL[k] || k;
-            return `<span class="cap-pill ${cls}" title="${label}">${k}</span>`;
-        }).join('');
+            let display = k, tip = label;
+            if ((k === 'em' || k === 'pn') && counts[k] > 1) {
+                display = `${k} +${counts[k] - 1}`;
+                tip = `${label} (${counts[k]} total)`;
+            }
+            return `<span class="cap-pill ${cls}" title="${tip}">${display}</span>`;
+        });
+
+        if (addrCount > 1) {
+            pills.push(`<span class="cap-pill identifier-addr" title="${addrCount} addresses total">+${addrCount - 1} addr</span>`);
+        }
+
+        return pills.join('');
     }
 
     function renderCaptures() {
