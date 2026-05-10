@@ -33,10 +33,31 @@ document.addEventListener('DOMContentLoaded', () => {
     function isHashToken(k)    { return /^(em|pn|fn|ln|sa)\d*$/.test(k); }
     function isCountryToken(k) { return /^co\d*$/.test(k); }
 
+    // Gmail/Googlemail: Plus-Tag und Punkte im local-part entfernen, da Google
+    // diese vor dem Hashen verwirft. Andere Domains: nur trim + lowercase.
+    const GMAIL_DOMAINS = new Set(['gmail.com', 'googlemail.com']);
+    function normalizeEmail(v) {
+        const s = v.trim().toLowerCase();
+        const at = s.lastIndexOf('@');
+        if (at < 0) return s;
+        const domain = s.slice(at + 1);
+        if (!GMAIL_DOMAINS.has(domain)) return s;
+        const local = s.slice(0, at).split('+')[0].replace(/\./g, '');
+        return `${local}@${domain}`;
+    }
+
+    // Phone: alle Nicht-Ziffern entfernen, fuehrendes "+" beibehalten.
+    // Default-Hash (Google Ads): MIT "+". Zusaetzlich Meta-Variante OHNE "+".
+    function normalizePhone(v) {
+        const cleaned = v.replace(/[^\d+]/g, '');
+        if (cleaned.startsWith('+')) return '+' + cleaned.slice(1).replace(/\+/g, '');
+        return cleaned.replace(/\+/g, '');
+    }
+
     // Felder, die als Hash auftreten koennen -> Vergleichsfeld dynamisch
     const verifyFields = [
-        { id: 'v_email',  label: 'Email',      placeholder: 'test@example.com', hashKeys: ['sha256_email_address', 'em'] },
-        { id: 'v_phone',  label: 'Phone',      placeholder: '+4912345678',      hashKeys: ['sha256_phone_number', 'pn'], normalize: v => v.replace(/\s+/g, '') },
+        { id: 'v_email',  label: 'Email',      placeholder: 'test@example.com', hashKeys: ['sha256_email_address', 'em'], normalize: normalizeEmail },
+        { id: 'v_phone',  label: 'Phone',      placeholder: '+4912345678',      hashKeys: ['sha256_phone_number', 'pn'], normalize: normalizePhone },
         { id: 'v_fn',     label: 'First Name', placeholder: 'Max',              hashKeys: ['sha256_first_name', 'fn0'] },
         { id: 'v_ln',     label: 'Last Name',  placeholder: 'Mustermann',       hashKeys: ['sha256_last_name', 'ln0'] },
         { id: 'v_street', label: 'Street',     placeholder: 'Hauptstr. 1',      hashKeys: ['sha256_street', 'sa0'] }
@@ -112,6 +133,25 @@ document.addEventListener('DOMContentLoaded', () => {
         return observed === expected.hex
             || observed.toLowerCase() === expected.hex
             || observed === expected.b64url;
+    }
+
+    // Phone-spezifisch: 'match' (Google Ads-konform mit "+"), 'meta-only'
+    // (passt nur ohne fuehrendes "+", also Meta-Format), oder 'mismatch'.
+    function evalMatch(observed, expected) {
+        if (!expected) return 'mismatch';
+        if (hashMatches(observed, expected)) return 'match';
+        if (expected.metaAlt && hashMatches(observed, expected.metaAlt)) return 'meta-only';
+        return 'mismatch';
+    }
+
+    function renderMatchStatus(observed, expected) {
+        const kind = evalMatch(observed, expected);
+        if (kind === 'match') return '<span class="match">MATCH</span>';
+        if (kind === 'meta-only') {
+            const tip = "Hash matched only without leading '+' — Meta CAPI format, not E.164-compliant for Google Ads.";
+            return `<span class="match">MATCH</span><span class="fmt-warn" title="${tip}">META ONLY · NO '+'</span>`;
+        }
+        return '<span class="no-match">ERR</span>';
     }
 
     function encPill(enc) {
@@ -292,9 +332,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const enc = field.startsWith('sha256_') ? detectHashEncoding(String(val)) : null;
         let status = '';
         if (verifyId && hashes[verifyId]) {
-            status = hashMatches(String(val), hashes[verifyId])
-                ? '<span class="match">MATCH</span>'
-                : '<span class="no-match">ERR</span>';
+            status = renderMatchStatus(String(val), hashes[verifyId]);
         }
         status += encPill(enc);
         if (field === 'country') status += countryWarning(val);
@@ -386,9 +424,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const enc = isHashToken(k) ? detectHashEncoding(v) : null;
             let status = '';
             if (verifyId && hashes[verifyId]) {
-                status = hashMatches(v, hashes[verifyId])
-                    ? '<span class="match">MATCH</span>'
-                    : '<span class="no-match">ERR</span>';
+                status = renderMatchStatus(v, hashes[verifyId]);
             }
             status += encPill(enc);
             if (isCountryToken(k)) status += countryWarning(v);
@@ -471,7 +507,11 @@ document.addEventListener('DOMContentLoaded', () => {
             const val = verifyState[f.id];
             if (!val) return;
             const normalized = f.normalize ? f.normalize(val) : val;
-            hashes[f.id] = await sha256(normalized);
+            const h = await sha256(normalized);
+            if (f.id === 'v_phone' && normalized.startsWith('+')) {
+                h.metaAlt = await sha256(normalized.slice(1));
+            }
+            hashes[f.id] = h;
         }));
 
         renderObj(parsedObj, objRaw, hashes, objKeys);
