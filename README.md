@@ -1,6 +1,6 @@
 # Enhanced Conversion Data Validator
 
-A Chrome extension for inspecting and validating Google Ads **Enhanced Conversions** data — both the `em` parameter sent in conversion requests and the `user_data` objects pushed via GTM, gtag, or raw JSON.
+A Chrome extension for inspecting and validating **Enhanced Conversions** data sent to Google Ads and Google Analytics 4 — both the `em` parameter in conversion / GA4 collect requests and the `user_data` objects pushed via GTM, gtag, or raw JSON.
 
 Built for marketers, analysts, and engineers who need to verify that the data leaving the browser actually matches what they think they're sending.
 
@@ -23,14 +23,16 @@ Built for marketers, analysts, and engineers who need to verify that the data le
 
 **Live network recording**:
 
-- Capture Google Ads conversion requests in real time, listed as clickable cards
+- Capture Google Ads conversion requests **and** GA4 `/g/collect` requests in real time, listed as clickable cards
+- GA4 cards are visually distinguished by a left accent border (indigo); the optional `Show also Google Analytics requests with EM` checkbox toggles their visibility
 - Pills show which identifiers each request carries (em, pn, fn0, ln0, …)
 - Hover reveals full names; click loads the `em` into the decoder
 - The small `i` icon on each card opens a detail view with **all** query and body parameters of that request — useful for telemetry fields like `gcs`, `gcd`, `gtm`, `dma`, `tag_exp`
 - Filter to show only requests with `em` payload (default on, hides telemetry pings)
-- Export captures as JSON for documentation or analysis
+- Export captures as JSON for documentation or analysis (each entry tagged `source: 'ads' | 'ga'`)
 - Permission requested per-site via the URL field — the extension only listens on origins you explicitly grant
 - Granted sites are listed in a collapsible **Permitted sites** block under the URL input; one click on `×` revokes a site (active recording is stopped first)
+- **Limitations** for GA4 capture: only the standard `*.google-analytics.com/g/collect` and `*.analytics.google.com/g/collect` endpoints are detected. Custom loaders, Google Tag Gateway, and server-side GTM on first-party domains route through unpredictable paths and won't show up — check the browser's Network tab in those cases.
 
 ## Install
 
@@ -77,9 +79,9 @@ The recording continues in the background even when the Side Panel is closed. It
 
 - `storage` — persist recording state and captures across SW lifecycle
 - `sidePanel` — UI placement
-- `webRequest` — observe Google Ads requests (read-only, no blocking, no modification)
+- `webRequest` — observe Google Ads and GA4 requests (read-only, no blocking, no modification)
 - `tabs` — read the active tab URL to pre-fill the recording URL field
-- `host_permissions` (static): `googleadservices.com/{pagead,ccm}/*` and `www.google.com/{pagead,ccm}/*` — the **target** domains
+- `host_permissions` (static): `googleadservices.com/{pagead,ccm}/*`, `www.google.com/{pagead,ccm}/*`, and the GA4 collect endpoints `*.google-analytics.com/g/collect*` and `*.analytics.google.com/g/collect*` — the **target** domains
 - `optional_host_permissions: ["<all_urls>"]` — granted **per-site at runtime** when you click "Permit & Record" for the **initiator** origin (the page where the conversion fires from). The extension never auto-requests permissions — every site grant requires an explicit user action.
 
 The extension does not transmit anything anywhere. All processing is local.
