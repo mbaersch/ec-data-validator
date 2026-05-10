@@ -14,12 +14,16 @@ Built for marketers, analysts, and engineers who need to verify that the data le
 - Optionally enter plaintext below to verify hashes match — values are hashed in both encodings and the result is shown per token
 - Compliance check: green when minimum requirements are met (Email *or* full address); grey/yellow warnings for incomplete data
 
+<img width="607" height="901" alt="image" src="https://github.com/user-attachments/assets/a181bc47-d15c-41a1-a0d2-14d8b20817d0" />
+
 **Inspect a `user_data` object**:
 
 - Accepts `dataLayer.push({…})`, `gtag('event', '…', {…})`, raw JSON, or just the `{…}` itself
 - JS-style syntax (unquoted keys, single quotes, dotted keys like `gtm.uniqueEventId`) is normalized automatically — paste directly from Tag Assistant if you want
 - Verifies hashed fields the same way as the EM Decoder
 - **Structure validation**: address fields (`first_name`, `country`, `postal_code`, …) outside of `user_data.address` trigger a structure-error warning — these don't reach Google as expected
+
+<img width="597" height="868" alt="image" src="https://github.com/user-attachments/assets/697d1dee-38f5-45c9-9ccf-c16610c2c880" />
 
 **Live network recording**:
 
@@ -33,6 +37,8 @@ Built for marketers, analysts, and engineers who need to verify that the data le
 - Permission requested per-site via the URL field — the extension only listens on origins you explicitly grant
 - Granted sites are listed in a collapsible **Permitted sites** block under the URL input; one click on `×` revokes a site (active recording is stopped first)
 - **Limitations** for GA4 capture: only the standard `*.google-analytics.com/g/collect` and `*.analytics.google.com/g/collect` endpoints are detected. Custom loaders, Google Tag Gateway, and server-side GTM on first-party domains route through unpredictable paths and won't show up — check the browser's Network tab in those cases.
+
+<img width="664" height="414" alt="image" src="https://github.com/user-attachments/assets/0f804a14-317b-4ced-821f-b71f971c3bbf" />
 
 ## Install
 
