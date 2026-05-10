@@ -84,6 +84,9 @@
     .cap-card:hover { border-color: var(--primary); background: #fef9f4; }
     .cap-card.no-em { opacity: 0.55; cursor: default; }
     .cap-card.no-em:hover { background: #fff; border-color: var(--border); }
+    .cap-card.source-ga { border-left: 3px solid #7c3aed; padding-left: 8px; }
+    .rec-filter-info { display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; border-radius: 50%; background: #f1f5f9; color: #64748b; font-size: 9px; font-style: italic; font-weight: 700; font-family: serif; cursor: help; margin-left: 4px; line-height: 1; }
+    .rec-filter-info:hover { background: var(--primary); color: #fff; }
     .cap-card-head { display: flex; gap: 6px; align-items: baseline; font-family: 'Fira Code', 'Consolas', monospace; font-size: 10px; color: var(--muted); margin-bottom: 6px; flex-wrap: wrap; }
     .cap-time { color: var(--text); }
     .cap-method { font-weight: 700; color: var(--secondary); font-size: 9px; }
@@ -165,6 +168,13 @@
       <label class="rec-filter">
         <input type="checkbox" id="recFilterEm" checked>
         Show only requests with <code>em</code>
+      </label>
+    </div>
+    <div class="rec-row" style="margin-top:6px;">
+      <label class="rec-filter">
+        <input type="checkbox" id="recFilterGa" checked>
+        Show also Google Analytics requests with EM
+        <span class="rec-filter-info" title="Only standard GA4 endpoints (/g/collect) are detected. Custom loaders, Google Tag Gateway and server-side GTM on first-party domains will not show up here — check the browser's Network tab." aria-label="Info about limitations">i</span>
       </label>
     </div>
     <div id="recError" class="rec-error" hidden></div>

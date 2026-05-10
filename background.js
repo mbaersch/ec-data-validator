@@ -9,7 +9,10 @@ const TARGET_PATTERNS = [
   'https://*.googleadservices.com/pagead/*',
   'https://*.googleadservices.com/ccm/*',
   'https://www.google.com/pagead/*',
-  'https://www.google.com/ccm/*'
+  'https://www.google.com/ccm/*',
+  'https://www.google-analytics.com/g/collect*',
+  'https://*.google-analytics.com/g/collect*',
+  'https://*.analytics.google.com/g/collect*'
 ];
 
 let state = { recording: false, captures: [] };
@@ -114,6 +117,14 @@ function enforceCap(capture) {
   capture.truncated = true;
 }
 
+function classifySource(host) {
+  if (!host) return 'ads';
+  const h = host.toLowerCase();
+  if (h.endsWith('googleadservices.com') || h === 'www.google.com') return 'ads';
+  if (h.endsWith('google-analytics.com') || h.endsWith('analytics.google.com')) return 'ga';
+  return 'ads';
+}
+
 function broadcast(msg) {
   chrome.runtime.sendMessage(msg).catch(() => { /* no listeners — ignore */ });
 }
@@ -132,7 +143,8 @@ chrome.webRequest.onBeforeRequest.addListener(
       em: em,
       queryParams: queryParams,
       bodyParams: bodyParams,
-      truncated: false
+      truncated: false,
+      source: classifySource(host)
     };
     enforceCap(capture);
     state.captures.push(capture);
@@ -226,7 +238,10 @@ globalThis.revokeAllOptionalOrigins = async () => {
     'https://*.googleadservices.com/pagead/*',
     'https://*.googleadservices.com/ccm/*',
     'https://www.google.com/pagead/*',
-    'https://www.google.com/ccm/*'
+    'https://www.google.com/ccm/*',
+    'https://www.google-analytics.com/g/collect*',
+    'https://*.google-analytics.com/g/collect*',
+    'https://*.analytics.google.com/g/collect*'
   ]);
   const toRemove = perms.origins.filter(o => !staticOrigins.has(o));
   if (toRemove.length === 0) {

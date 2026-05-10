@@ -538,6 +538,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let captures = [];
     let recording = false;
     let filterEmOnly = true;
+    let filterIncludeGa = true;
 
     function normalizeOrigin(input) {
         if (!input) return null;
@@ -607,21 +608,29 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function renderCaptures() {
         recCount.textContent = captures.length;
-        const visible = filterEmOnly ? captures.filter(c => !!c.em) : captures;
+        const visible = captures.filter(c => {
+            if (filterEmOnly && !c.em) return false;
+            if (!filterIncludeGa && (c.source || 'ads') === 'ga') return false;
+            return true;
+        });
         if (visible.length === 0) {
             capList.innerHTML = '';
             capList.hidden = true;
             capEmpty.hidden = false;
-            capEmpty.textContent = (captures.length === 0)
-                ? 'No captures yet — start recording to collect requests.'
-                : 'No captures with em — uncheck the filter to see all requests.';
+            if (captures.length === 0) {
+                capEmpty.textContent = 'No captures yet — start recording to collect requests.';
+            } else if (!filterIncludeGa && captures.every(c => (c.source || 'ads') === 'ga')) {
+                capEmpty.textContent = 'Only GA captures present — enable the GA filter to see them.';
+            } else {
+                capEmpty.textContent = 'No captures with em — uncheck the filter to see all requests.';
+            }
             return;
         }
         capList.hidden = false;
         capEmpty.hidden = true;
         capList.innerHTML = visible.slice().reverse().map(c => {
             const realIdx = captures.indexOf(c);
-            return `<div class="cap-card ${c.em ? '' : 'no-em'}" data-idx="${realIdx}">
+            return `<div class="cap-card ${c.em ? '' : 'no-em'} source-${c.source || 'ads'}" data-idx="${realIdx}">
                 <button class="cap-detail-btn" data-detail-idx="${realIdx}" aria-label="Show details" title="Show details">i</button>
                 <div class="cap-card-head">
                     <span class="cap-time">${formatTime(c.ts)}</span>
@@ -732,6 +741,13 @@ document.addEventListener('DOMContentLoaded', () => {
         renderCaptures();
     });
 
+    const recFilterGa = document.getElementById('recFilterGa');
+    recFilterGa.addEventListener('change', () => {
+        filterIncludeGa = recFilterGa.checked;
+        chrome.storage.local.set({ recFilterGa: filterIncludeGa });
+        renderCaptures();
+    });
+
     recClear.addEventListener('click', () => {
         captures = [];
         renderCaptures();
@@ -761,7 +777,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 method: c.method,
                 host: c.host,
                 url: c.url,
-                em: c.em
+                em: c.em,
+                source: c.source || 'ads'
             }))
         };
         const json = JSON.stringify(payload, null, 2);
@@ -792,10 +809,12 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // Initial state pull from background + filter persistence
-    chrome.storage.local.get('recFilterEm', (res) => {
+    chrome.storage.local.get(['recFilterEm', 'recFilterGa'], (res) => {
         // Default to true if never set
         filterEmOnly = (res.recFilterEm === undefined) ? true : !!res.recFilterEm;
+        filterIncludeGa = (res.recFilterGa === undefined) ? true : !!res.recFilterGa;
         recFilterEm.checked = filterEmOnly;
+        recFilterGa.checked = filterIncludeGa;
         renderCaptures();
     });
 
@@ -882,15 +901,20 @@ document.addEventListener('DOMContentLoaded', () => {
       'https://*.googleadservices.com/pagead/*',
       'https://*.googleadservices.com/ccm/*',
       'https://www.google.com/pagead/*',
-      'https://www.google.com/ccm/*'
+      'https://www.google.com/ccm/*',
+      'https://www.google-analytics.com/g/collect*',
+      'https://*.google-analytics.com/g/collect*',
+      'https://*.analytics.google.com/g/collect*'
     ]);
-    // Chrome kollabiert die 4 Manifest-Patterns oft zu breiteren Forms:
+    // Chrome kollabiert die Manifest-Patterns oft zu breiteren Forms:
     //   "https://*.googleadservices.com/*"  und  "https://www.google.com/*"
     // Daher matchen wir am Host, nicht am exakten Pattern.
     function isStaticOrigin(o) {
       if (STATIC_ORIGINS.has(o)) return true;
       return /\/\/(\*\.)?googleadservices\.com\//.test(o)
-          || /\/\/www\.google\.com\//.test(o);
+          || /\/\/www\.google\.com\//.test(o)
+          || /\/\/([\w*-]+\.)*google-analytics\.com\//.test(o)
+          || /\/\/([\w*-]+\.)*analytics\.google\.com\//.test(o);
     }
 
     const permDetails = document.getElementById('permDetails');

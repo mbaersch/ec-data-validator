@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Enhanced Conversion Data Validator",
-  "version": "2.1",
+  "version": "2.2",
   "action": {
     "default_title": "Open Validator",
     "default_icon": {
@@ -25,7 +25,10 @@
     "https://*.googleadservices.com/pagead/*",
     "https://*.googleadservices.com/ccm/*",
     "https://www.google.com/pagead/*",
-    "https://www.google.com/ccm/*"
+    "https://www.google.com/ccm/*",
+    "https://www.google-analytics.com/g/collect*",
+    "https://*.google-analytics.com/g/collect*",
+    "https://*.analytics.google.com/g/collect*"
   ],
   "optional_host_permissions": [
     "<all_urls>"
