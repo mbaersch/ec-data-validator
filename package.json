@@ -1,0 +1,16 @@
+{
+  "name": "ec-data-validator",
+  "version": "2.2.0",
+  "description": "Build, screenshot and test tooling for the Enhanced Conversion Data Validator browser extension.",
+  "private": true,
+  "scripts": {
+    "test": "playwright test",
+    "screenshots": "node scripts/generate-screenshots.js",
+    "store-assets": "node scripts/generate-store-screenshots.js",
+    "build": "node scripts/package-extension.js"
+  },
+  "type": "commonjs",
+  "devDependencies": {
+    "@playwright/test": "^1.58.2"
+  }
+}
