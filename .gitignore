@@ -1,0 +1,49 @@
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Claude Code local config
+.claude/
+
+# Editors / IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Temporary files
+tmpshot.png
+*.tmp
+*.bak
+*.stackdump
+
+# Logs
+*.log
+
+# Local environment
+.env
+.env.local
+
+# Build artefacts (not used yet, but pre-emptive)
+node_modules/
+dist/
+build/
+docs/superpowers/
+
+# Test- und Screenshot-Outputs
+screenshots/
+webstore/
+test-results/
+playwright-report/
+tmp-user-data*/
+
+# Packaged extension archives
+*.zip
+*.crx
+*.pem
+
+ressources/
+test-page/
+AGENTS.md
