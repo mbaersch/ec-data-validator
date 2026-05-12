@@ -180,12 +180,23 @@ document.addEventListener('DOMContentLoaded', () => {
             .replace(/,\s*([\]}])/g, '$1');                      // trailing commas
     }
 
+    function classifyEMInput(raw) {
+        let s = (raw || '').trim();
+        if (!s) return null;
+        try { s = decodeURIComponent(s); } catch (e) { /* ignore */ }
+        if (s.startsWith('eme=')) return 'eme';
+        if (s.startsWith('em=')) return 'em';
+        if (/(^|~)emkid\./.test(s) && /(^|~)ev\./.test(s) && !/(^|~)em\./.test(s)) return 'eme';
+        return 'em';
+    }
+
     function getEMKeys(raw) {
         const keys = new Set();
         if (!raw) return keys;
         let s = raw.trim();
         try { s = decodeURIComponent(s); } catch (e) { /* ignore */ }
-        if (s.startsWith('em=')) s = s.substring(3);
+        if (s.startsWith('eme=')) s = s.substring(4);
+        else if (s.startsWith('em=')) s = s.substring(3);
         s.split('~').forEach(p => {
             const i = p.indexOf('.');
             if (i !== -1) keys.add(p.substring(0, i));
@@ -400,12 +411,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
         let s = raw.trim();
         try { s = decodeURIComponent(s); } catch (e) { /* ignore */ }
-        if (s.startsWith('em=')) s = s.substring(3);
+        const mode = classifyEMInput(s);
+        if (mode === 'eme' && s.startsWith('eme=')) s = s.substring(4);
+        else if (s.startsWith('em=')) s = s.substring(3);
 
-        const compliance = renderCompliance(checkMinReq(emKeys));
-
-        // Parse all tokens first so duplicates (e.g. multiple `em.` for several
-        // emails) can be numbered consistently in the label column.
         const tokens = [];
         s.split('~').forEach(p => {
             const i = p.indexOf('.');
@@ -416,6 +425,28 @@ document.addEventListener('DOMContentLoaded', () => {
         tokens.forEach(t => { tokenTotal[t.k] = (tokenTotal[t.k] || 0) + 1; });
         const tokenSeen = {};
 
+        if (mode === 'eme') {
+            let emeHtml = '<div class="enc-banner">&#9888; Encrypted parameter — cannot decode or verify. Showing visible metadata only.</div>';
+            emeHtml += '<table class="res-table">';
+            tokens.forEach(t => {
+                const k = t.k, v = t.v;
+                tokenSeen[k] = (tokenSeen[k] || 0) + 1;
+                let label = k;
+                if (k === 'tv') label = 'Version';
+                else if (k === 'emkid') label = 'Encryption Key ID';
+                else if (k === 'ev') label = 'Encrypted Value';
+                let displayValue = v;
+                if (k === 'ev' && v.length > 40) {
+                    displayValue = v.slice(0, 40) + '…[encrypted, ' + v.length + ' chars]';
+                }
+                emeHtml += `<tr><td><b>${label}</b></td><td><code>${displayValue}</code></td></tr>`;
+            });
+            emeHtml += '</table>';
+            target.innerHTML = emeHtml;
+            return;
+        }
+
+        const compliance = renderCompliance(checkMinReq(emKeys));
         let html = compliance + '<table class="res-table">';
         tokens.forEach(t => {
             const k = t.k, v = t.v;
@@ -495,7 +526,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const emRaw = emInput.value;
         const objRaw = objInput.value;
 
-        const emKeys = getEMKeys(emRaw);
+        const emMode = classifyEMInput(emRaw);
+        const emKeys = (emMode === 'eme') ? new Set() : getEMKeys(emRaw);
         const parsedObj = parseObj(objRaw);
         const objKeys = parsedObj ? collectObjKeys(parsedObj) : new Set();
 
@@ -603,11 +635,14 @@ document.addEventListener('DOMContentLoaded', () => {
         return d.toLocaleTimeString('de-DE', { hour12: false }) + '.' + String(d.getMilliseconds()).padStart(3, '0');
     }
 
-    function renderPills(em) {
-        if (!em) return '<span class="cap-pill none" title="No em parameter in this request">no em</span>';
+    function renderPills(em, eme) {
+        if (!em && eme) {
+            return '<span class="cap-pill identifier-eme" title="Encrypted parameter — cannot decode here">eme</span>';
+        }
+        if (!em && !eme) {
+            return '<span class="cap-pill none" title="No em or eme parameter in this request">no em</span>';
+        }
 
-        // Count occurrences per token (handles e.g. 3× `em.HASH`) and detect
-        // additional addresses via the highest indexed address token (fn1, ln1, ...).
         const counts = {};
         let s = em.trim();
         try { s = decodeURIComponent(s); } catch (e) { /* ignore */ }
@@ -620,36 +655,41 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         const keys = new Set(Object.keys(counts));
         const ordered = PILL_ORDER.filter(k => keys.has(k));
-        if (ordered.length === 0) return '<span class="cap-pill none" title="em present but no recognized identifier tokens">no identifiers</span>';
 
-        let addrCount = 1;
-        for (const k of keys) {
-            const m = k.match(/^(fn|ln|sa|ct|st|zp|pc|rg|co)(\d+)$/);
-            if (m) addrCount = Math.max(addrCount, parseInt(m[2], 10) + 1);
-        }
-
-        const pills = ordered.map(k => {
-            const cls = PILL_CLASS[k] || '';
-            const label = PILL_LABEL[k] || k;
-            let display = k, tip = label;
-            if ((k === 'em' || k === 'pn') && counts[k] > 1) {
-                display = `${k} +${counts[k] - 1}`;
-                tip = `${label} (${counts[k]} total)`;
+        let pills;
+        if (ordered.length === 0) {
+            pills = ['<span class="cap-pill none" title="em present but no recognized identifier tokens">no identifiers</span>'];
+        } else {
+            let addrCount = 1;
+            for (const k of keys) {
+                const m = k.match(/^(fn|ln|sa|ct|st|zp|pc|rg|co)(\d+)$/);
+                if (m) addrCount = Math.max(addrCount, parseInt(m[2], 10) + 1);
             }
-            return `<span class="cap-pill ${cls}" title="${tip}">${display}</span>`;
-        });
-
-        if (addrCount > 1) {
-            pills.push(`<span class="cap-pill identifier-addr" title="${addrCount} addresses total">+${addrCount - 1} addr</span>`);
+            pills = ordered.map(k => {
+                const cls = PILL_CLASS[k] || '';
+                const label = PILL_LABEL[k] || k;
+                let display = k, tip = label;
+                if ((k === 'em' || k === 'pn') && counts[k] > 1) {
+                    display = `${k} +${counts[k] - 1}`;
+                    tip = `${label} (${counts[k]} total)`;
+                }
+                return `<span class="cap-pill ${cls}" title="${tip}">${display}</span>`;
+            });
+            if (addrCount > 1) {
+                pills.push(`<span class="cap-pill identifier-addr" title="${addrCount} addresses total">+${addrCount - 1} addr</span>`);
+            }
         }
 
+        if (eme) {
+            pills.push('<span class="cap-pill identifier-eme" title="Also carries encrypted eme — cannot decode">eme</span>');
+        }
         return pills.join('');
     }
 
     function renderCaptures() {
         recCount.textContent = captures.length;
         const visible = captures.filter(c => {
-            if (filterEmOnly && !c.em) return false;
+            if (filterEmOnly && !c.em && !c.eme) return false;
             if (!filterIncludeGa && (c.source || 'ads') === 'ga') return false;
             return true;
         });
@@ -662,7 +702,7 @@ document.addEventListener('DOMContentLoaded', () => {
             } else if (!filterIncludeGa && captures.every(c => (c.source || 'ads') === 'ga')) {
                 capEmpty.textContent = 'Only GA captures present — enable the GA filter to see them.';
             } else {
-                capEmpty.textContent = 'No captures with em — uncheck the filter to see all requests.';
+                capEmpty.textContent = 'No captures with em or eme — uncheck the filter to see all requests.';
             }
             return;
         }
@@ -670,22 +710,32 @@ document.addEventListener('DOMContentLoaded', () => {
         capEmpty.hidden = true;
         capList.innerHTML = visible.slice().reverse().map(c => {
             const realIdx = captures.indexOf(c);
-            return `<div class="cap-card ${c.em ? '' : 'no-em'} source-${c.source || 'ads'}" data-idx="${realIdx}">
+            const hasIdentifier = !!(c.em || c.eme);
+            const transport = c.transport || 'google';
+            const source = c.source || 'ads';
+            return `<div class="cap-card ${hasIdentifier ? '' : 'no-em'} source-${source} transport-${transport}" data-idx="${realIdx}">
                 <button class="cap-detail-btn" data-detail-idx="${realIdx}" aria-label="Show details" title="Show details">i</button>
                 <div class="cap-card-head">
                     <span class="cap-time">${formatTime(c.ts)}</span>
                     <span class="cap-method">${c.method}</span>
                     <span class="cap-host">${shortenUrl(c.url, c.host)}</span>
                 </div>
-                <div class="cap-card-pills">${renderPills(c.em)}</div>
+                <div class="cap-card-pills">${renderPills(c.em, c.eme)}</div>
             </div>`;
         }).join('');
         capList.querySelectorAll('.cap-card').forEach(card => {
             card.addEventListener('click', () => {
                 const idx = Number(card.dataset.idx);
                 const cap = captures[idx];
-                if (!cap || !cap.em) return;
-                emInput.value = cap.em;
+                if (!cap) return;
+                let inputValue = null;
+                if (cap.em) {
+                    inputValue = cap.em;
+                } else if (cap.eme) {
+                    inputValue = 'eme=' + cap.eme;
+                }
+                if (!inputValue) return;
+                emInput.value = inputValue;
                 runUpdate();
                 emInput.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
             });
@@ -801,7 +851,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const recExport = document.getElementById('recExport');
     recExport.addEventListener('click', async () => {
-        const exportSet = filterEmOnly ? captures.filter(c => !!c.em) : captures;
+        const exportSet = filterEmOnly ? captures.filter(c => !!(c.em || c.eme)) : captures;
         if (exportSet.length === 0) {
             showError('Nothing to export.');
             setTimeout(() => showError(''), 2000);
@@ -818,7 +868,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 host: c.host,
                 url: c.url,
                 em: c.em,
-                source: c.source || 'ads'
+                eme: c.eme || null,
+                source: c.source || 'ads',
+                transport: c.transport || 'google'
             }))
         };
         const json = JSON.stringify(payload, null, 2);

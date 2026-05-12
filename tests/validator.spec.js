@@ -176,3 +176,20 @@ test('12. Country warning: full country name instead of ISO code triggers warnin
   expect(resultHtml.toLowerCase()).toMatch(/country|iso|two[- ]?letter|code/);
   await page.close();
 });
+
+test('13. eme paste: encrypted banner appears, verify block stays hidden', async () => {
+  const { page, errors } = await openPopup();
+  await activateTab(page, 'tab-em');
+  await page.fill('#emInput', fixtures.EME_TOKEN_WITH_PREFIX);
+  await page.dispatchEvent('#emInput', 'input');
+  await page.waitForTimeout(300);
+
+  await expect(page.locator('.enc-banner')).toBeVisible();
+  await expect(page.locator('#vBox')).toHaveClass(/hidden/);
+
+  const resultHtml = await page.locator('#emResult').innerHTML();
+  expect(resultHtml.toLowerCase()).toMatch(/encrypted/);
+
+  expect(errors).toEqual([]);
+  await page.close();
+});

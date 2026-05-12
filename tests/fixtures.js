@@ -103,6 +103,10 @@ const ECID_STRING_B64URL =
   `tv.1~em.${HASHES.emailGmail.b64url}~pn.${HASHES.phoneE164.b64url}` +
   `~fn0.${HASHES.nameTest.b64url}~ln0.${HASHES.nameTest.b64url}`;
 
+// Encrypted eme-Variante: tv + emkid + ev (Cloud-Edge encrypted)
+const EME_TOKEN_RAW = 'tv.1~emkid.a615f8fd-f6b9-4fec-a193-87a7ce43e04b~ev.BG3YhHCjm3TfSvdLh-T_l2zxoIPbTXDVW-gSncSxhit2O6WBU9ytsTrw6XdGJuocXOK8F-rausHZQtCzNa-3Jut2XOqM01cIt01JoScnA-d6ER3wN51VT2Ou82g2wvfXZO-JonnjvNjDnbn4cUPwdmpiDEbXO1MpYGdIUnSahmuegouG78YGxr7s-7aNi7nfabwA60Ul-pGm';
+const EME_TOKEN_WITH_PREFIX = 'eme=' + EME_TOKEN_RAW;
+
 module.exports = {
   HASHES,
   ECID_STRING_HEX,
@@ -114,5 +118,7 @@ module.exports = {
   USER_DATA_EMPTY_JS,
   USER_DATA_MISPLACED_JS,
   USER_DATA_COUNTRY_WARN_JS,
-  USER_DATA_PLAINTEXT_EMAIL_JS
+  USER_DATA_PLAINTEXT_EMAIL_JS,
+  EME_TOKEN_RAW,
+  EME_TOKEN_WITH_PREFIX
 };
