@@ -28,15 +28,17 @@ Built for marketers, analysts, and engineers who need to verify that the data le
 **Live network recording**:
 
 - Capture Google Ads conversion requests **and** GA4 `/g/collect` requests in real time, listed as clickable cards
-- GA4 cards are visually distinguished by a left accent border (indigo); the optional `Show also Google Analytics requests with EM` checkbox toggles their visibility
-- Pills show which identifiers each request carries (em, pn, fn0, ln0, …)
-- Hover reveals full names; click loads the `em` into the decoder
+- **Tag Gateway and server-side GTM on first-party origins** are captured as well, as soon as you grant the respective origin via "Permit & Record" — requests are recognized by typical path markers (`/ccm/`, `/pagead/`, `/g/collect`) or by the presence of an `em`/`eme` parameter, so normal page loads on the granted origin are ignored
+- First-party captures get a soft orange background tint to distinguish them from direct-to-Google requests
+- GA4 captures (whether direct or via sGTM on a first-party `/g/collect` endpoint) are visually distinguished by a left accent border (indigo); the optional `Show also Google Analytics requests with EM` checkbox toggles their visibility
+- The encrypted **`eme`** parameter (Tag Gateway / Cloud-Edge encrypted) is recognized and flagged with its own yellow pill — the key lives at the Cloud Edge and cannot be decoded by the extension, but visible metadata (`tv`, `emkid`, `ev`) is shown in the decoder when you click such a capture
+- Pills show which identifiers each request carries (em, pn, fn0, ln0, … or `eme` when encrypted)
+- Hover reveals full names; click loads the `em` (or `eme=…` prefix) into the decoder
 - The small `i` icon on each card opens a detail view with **all** query and body parameters of that request — useful for telemetry fields like `gcs`, `gcd`, `gtm`, `dma`, `tag_exp`
-- Filter to show only requests with `em` payload (default on, hides telemetry pings)
-- Export captures as JSON for documentation or analysis (each entry tagged `source: 'ads' | 'ga'`)
-- Permission requested per-site via the URL field — the extension only listens on origins you explicitly grant
+- Filter to show only requests carrying `em` or `eme` (default on, hides telemetry pings)
+- Export captures as JSON for documentation or analysis (each entry tagged `source: 'ads' | 'ga'` and `transport: 'google' | 'first-party'`, plus `eme` when present)
+- Permission requested per-site via the URL field — the extension only listens on origins you explicitly grant; the webRequest listener is re-registered automatically when permissions change, so newly granted origins are picked up without reloading the service worker
 - Granted sites are listed in a collapsible **Permitted sites** block under the URL input; one click on `×` revokes a site (active recording is stopped first)
-- **Limitations** for GA4 capture: only the standard `*.google-analytics.com/g/collect` and `*.analytics.google.com/g/collect` endpoints are detected. Custom loaders, Google Tag Gateway, and server-side GTM on first-party domains route through unpredictable paths and won't show up — check the browser's Network tab in those cases.
 
 <img width="664" height="414" alt="image" src="https://github.com/user-attachments/assets/0f804a14-317b-4ced-821f-b71f971c3bbf" />
 
