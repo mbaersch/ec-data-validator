@@ -5,7 +5,7 @@ chrome.sidePanel
   .catch(err => console.error(err));
 
 const RING_SIZE = 50;
-const TARGET_PATTERNS = [
+const STATIC_PATTERNS = [
   'https://*.googleadservices.com/pagead/*',
   'https://*.googleadservices.com/ccm/*',
   'https://www.google.com/pagead/*',
@@ -14,6 +14,15 @@ const TARGET_PATTERNS = [
   'https://*.google-analytics.com/g/collect*',
   'https://*.analytics.google.com/g/collect*'
 ];
+
+function isStaticPattern(pattern) {
+  return STATIC_PATTERNS.includes(pattern);
+}
+
+function buildListenerPatterns(grantedOrigins) {
+  const custom = (grantedOrigins || []).filter(o => !isStaticPattern(o));
+  return [...STATIC_PATTERNS, ...custom];
+}
 
 let state = { recording: false, captures: [] };
 
@@ -77,8 +86,9 @@ function extractAllParams(url, body) {
     } catch (e) { bodyParams = null; }
   }
 
-  let em = queryParams.em || (bodyParams && bodyParams.em) || null;
-  return { em, queryParams, bodyParams };
+  let em  = queryParams.em  || (bodyParams && bodyParams.em)  || null;
+  let eme = queryParams.eme || (bodyParams && bodyParams.eme) || null;
+  return { em, eme, queryParams, bodyParams };
 }
 
 const CAP_BYTES = 8192;
@@ -117,10 +127,18 @@ function enforceCap(capture) {
   capture.truncated = true;
 }
 
-function classifySource(host) {
-  if (!host) return 'ads';
-  const h = host.toLowerCase();
-  if (h.endsWith('googleadservices.com') || h === 'www.google.com') return 'ads';
+function isGoogleHost(host) {
+  const h = (host || '').toLowerCase();
+  return h.endsWith('googleadservices.com')
+      || h === 'www.google.com'
+      || h.endsWith('google-analytics.com')
+      || h.endsWith('analytics.google.com');
+}
+
+function classifySource(host, pathname) {
+  if (pathname && pathname.includes('/g/collect')) return 'ga';
+  if (pathname && (pathname.includes('/ccm/') || pathname.includes('/pagead/'))) return 'ads';
+  const h = (host || '').toLowerCase();
   if (h.endsWith('google-analytics.com') || h.endsWith('analytics.google.com')) return 'ga';
   return 'ads';
 }
@@ -129,34 +147,73 @@ function broadcast(msg) {
   chrome.runtime.sendMessage(msg).catch(() => { /* no listeners — ignore */ });
 }
 
-chrome.webRequest.onBeforeRequest.addListener(
-  (details) => {
-    if (!state.recording) return;
-    const { em, queryParams, bodyParams } = extractAllParams(details.url, details.requestBody);
-    let host = '';
-    try { host = new URL(details.url).host; } catch (e) {}
-    const capture = {
-      ts: details.timeStamp,
-      url: details.url,
-      host: host,
-      method: details.method,
-      em: em,
-      queryParams: queryParams,
-      bodyParams: bodyParams,
-      truncated: false,
-      source: classifySource(host)
-    };
-    enforceCap(capture);
-    state.captures.push(capture);
-    if (state.captures.length > RING_SIZE) {
-      state.captures = state.captures.slice(-RING_SIZE);
-    }
-    persist();
-    broadcast({ type: 'captureAdded', capture: capture, count: state.captures.length });
-  },
-  { urls: TARGET_PATTERNS },
-  ['requestBody']
-);
+function handleRequest(details) {
+  if (!state.recording) return;
+
+  let host = '', pathname = '';
+  try {
+    const u = new URL(details.url);
+    host = u.host;
+    pathname = u.pathname;
+  } catch (e) { return; }
+
+  const transport = isGoogleHost(host) ? 'google' : 'first-party';
+
+  const { em, eme, queryParams, bodyParams } = extractAllParams(details.url, details.requestBody);
+
+  if (transport === 'first-party') {
+    const hasPathMarker = /\/(ccm|pagead|g\/collect)(\/|$)/.test(pathname);
+    if (!hasPathMarker && !em && !eme) return;
+  }
+
+  const source = classifySource(host, pathname);
+
+  const capture = {
+    ts: details.timeStamp,
+    url: details.url,
+    host,
+    method: details.method,
+    em,
+    eme,
+    queryParams,
+    bodyParams,
+    truncated: false,
+    source,
+    transport
+  };
+  enforceCap(capture);
+  state.captures.push(capture);
+  if (state.captures.length > RING_SIZE) {
+    state.captures = state.captures.slice(-RING_SIZE);
+  }
+  persist();
+  broadcast({ type: 'captureAdded', capture, count: state.captures.length });
+}
+
+let activeListener = null;
+
+async function refreshListener() {
+  if (activeListener) {
+    try { chrome.webRequest.onBeforeRequest.removeListener(activeListener); } catch (e) {}
+  }
+  const perms = await new Promise(resolve => chrome.permissions.getAll(p => resolve(p || { origins: [] })));
+  const patterns = buildListenerPatterns(perms.origins || []);
+  activeListener = handleRequest;
+  try {
+    chrome.webRequest.onBeforeRequest.addListener(
+      activeListener, { urls: patterns }, ['requestBody']
+    );
+  } catch (e) {
+    console.error('[ec-validator] failed to register listener:', e, patterns);
+  }
+}
+
+chrome.permissions.onAdded.addListener(refreshListener);
+chrome.permissions.onRemoved.addListener(refreshListener);
+chrome.runtime.onInstalled.addListener(refreshListener);
+chrome.runtime.onStartup.addListener(refreshListener);
+
+refreshListener();
 
 chrome.runtime.onMessage.addListener((msg, sender, respond) => {
   if (!msg || !msg.type) return;
@@ -214,7 +271,7 @@ globalThis.checkSetup = async () => {
     captureCount: state.captures.length,
     permissions: perms.permissions,
     origins: perms.origins,
-    targetPatterns: TARGET_PATTERNS
+    targetPatterns: STATIC_PATTERNS
   };
   console.log('[ec-validator] checkSetup:', info);
   return info;
@@ -234,16 +291,8 @@ globalThis.revokeOrigin = (origin) => {
 
 globalThis.revokeAllOptionalOrigins = async () => {
   const perms = await chrome.permissions.getAll();
-  const staticOrigins = new Set([
-    'https://*.googleadservices.com/pagead/*',
-    'https://*.googleadservices.com/ccm/*',
-    'https://www.google.com/pagead/*',
-    'https://www.google.com/ccm/*',
-    'https://www.google-analytics.com/g/collect*',
-    'https://*.google-analytics.com/g/collect*',
-    'https://*.analytics.google.com/g/collect*'
-  ]);
-  const toRemove = perms.origins.filter(o => !staticOrigins.has(o));
+  const staticSet = new Set(STATIC_PATTERNS);
+  const toRemove = (perms.origins || []).filter(o => !staticSet.has(o));
   if (toRemove.length === 0) {
     console.log('[ec-validator] no optional origins to revoke');
     return;
@@ -257,7 +306,7 @@ globalThis.revokeAllOptionalOrigins = async () => {
 // regardless of recording state. Useful when patterns or permissions look off.
 globalThis.lightTest = () => {
   const cb = (d) => console.log('[ec-validator] LIGHT:', d.type, d.method, d.url);
-  chrome.webRequest.onBeforeRequest.addListener(cb, { urls: TARGET_PATTERNS });
+  chrome.webRequest.onBeforeRequest.addListener(cb, { urls: STATIC_PATTERNS });
   console.log('[ec-validator] light test active for 30s — fire a conversion now');
   setTimeout(() => {
     chrome.webRequest.onBeforeRequest.removeListener(cb);
