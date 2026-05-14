@@ -45,6 +45,119 @@ chrome.runtime.onStartup.addListener(() => {
   persist();
 });
 
+// Parameter keys carrying user_data fields can arrive in several shapes:
+//   ep.user_data.email_address           (GA4 event-parameter, URL-encoded)
+//   ep.user_data.address.first_name      (nested via dots in the key)
+//   user_data.email_address              (sGTM POST body / form-encoded)
+// Returns the dotted suffix as an array of path segments, or null if the key
+// does not belong to user_data.
+function userDataPath(key) {
+  if (typeof key !== 'string') return null;
+  if (key.startsWith('ep.user_data.')) return key.substring('ep.user_data.'.length).split('.');
+  if (key.startsWith('user_data.'))    return key.substring('user_data.'.length).split('.');
+  return null;
+}
+
+function setNested(target, path, value) {
+  if (!path.length) return;
+  let cur = target;
+  for (let i = 0; i < path.length - 1; i++) {
+    const seg = path[i];
+    if (!cur[seg] || typeof cur[seg] !== 'object') cur[seg] = {};
+    cur = cur[seg];
+  }
+  cur[path[path.length - 1]] = value;
+}
+
+function mergeUserDataObject(target, src) {
+  if (!src || typeof src !== 'object' || Array.isArray(src)) return;
+  for (const [k, v] of Object.entries(src)) {
+    if (v && typeof v === 'object' && !Array.isArray(v) && target[k] && typeof target[k] === 'object' && !Array.isArray(target[k])) {
+      mergeUserDataObject(target[k], v);
+    } else {
+      target[k] = v;
+    }
+  }
+}
+
+// Keys we treat as actual user-provided identifiers. Anything else (e.g.
+// `_tag_mode`, future meta fields) is ignored — a user_data block that only
+// contains meta keys is treated as empty, so the capture is not flagged as
+// carrying user data.
+const KNOWN_USERDATA_KEYS = new Set([
+  'email', 'email_address', 'sha256_email_address',
+  'phone_number', 'sha256_phone_number',
+  'first_name', 'sha256_first_name',
+  'last_name', 'sha256_last_name',
+  'street', 'sha256_street',
+  'city',
+  'region',
+  'postal_code',
+  'country'
+]);
+
+function hasKnownIdentifier(node) {
+  if (!node || typeof node !== 'object') return false;
+  if (Array.isArray(node)) return node.some(hasKnownIdentifier);
+  for (const k of Object.keys(node)) {
+    if (KNOWN_USERDATA_KEYS.has(k)) return true;
+    if (node[k] && typeof node[k] === 'object' && hasKnownIdentifier(node[k])) return true;
+  }
+  return false;
+}
+
+function extractUserData(url, body) {
+  const out = {};
+  let found = false;
+
+  try {
+    const u = new URL(url);
+    for (const [k, v] of u.searchParams.entries()) {
+      const path = userDataPath(k);
+      if (path) { setNested(out, path, v); found = true; }
+    }
+  } catch (e) { /* ignore */ }
+
+  if (body) {
+    try {
+      if (body.formData) {
+        for (const k of Object.keys(body.formData)) {
+          const path = userDataPath(k);
+          if (!path) continue;
+          const arr = body.formData[k];
+          const v = Array.isArray(arr) && arr.length > 0 ? String(arr[0]) : '';
+          setNested(out, path, v);
+          found = true;
+        }
+      } else if (body.raw && body.raw.length > 0 && body.raw[0].bytes) {
+        const text = new TextDecoder('utf-8').decode(body.raw[0].bytes);
+        let obj = null;
+        try { obj = JSON.parse(text); } catch (e) { obj = null; }
+        if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
+          if (obj.user_data && typeof obj.user_data === 'object' && !Array.isArray(obj.user_data)) {
+            mergeUserDataObject(out, obj.user_data);
+            found = true;
+          }
+          for (const [k, v] of Object.entries(obj)) {
+            const path = userDataPath(k);
+            if (path) { setNested(out, path, v); found = true; }
+          }
+        } else if (!obj) {
+          const params = new URLSearchParams(text);
+          for (const [k, v] of params.entries()) {
+            const path = userDataPath(k);
+            if (path) { setNested(out, path, v); found = true; }
+          }
+        }
+      }
+    } catch (e) { /* ignore */ }
+  }
+
+  if (!found) return null;
+  if (!hasKnownIdentifier(out)) return null;
+  return out;
+}
+
 function extractAllParams(url, body) {
   let queryParams = {};
   let bodyParams = null;
@@ -135,6 +248,26 @@ function isGoogleHost(host) {
       || h.endsWith('analytics.google.com');
 }
 
+// Requests, deren initiierender Tab eine Google-eigene UI ist (GA4-, Ads-,
+// GTM-, Tag-Assistant-UI), gehoeren nicht zur zu testenden Website und
+// werden komplett ignoriert.
+const INITIATOR_BLOCKLIST_HOSTS = new Set([
+  'analytics.google.com',
+  'ads.google.com',
+  'tagmanager.google.com',
+  'tagassistant.google.com'
+]);
+
+function isBlockedInitiator(initiator) {
+  if (!initiator) return false;
+  try {
+    const h = new URL(initiator).host.toLowerCase();
+    return INITIATOR_BLOCKLIST_HOSTS.has(h);
+  } catch (e) {
+    return false;
+  }
+}
+
 function classifySource(host, pathname) {
   if (pathname && pathname.includes('/g/collect')) return 'ga';
   if (pathname && (pathname.includes('/ccm/') || pathname.includes('/pagead/'))) return 'ads';
@@ -149,6 +282,7 @@ function broadcast(msg) {
 
 function handleRequest(details) {
   if (!state.recording) return;
+  if (isBlockedInitiator(details.initiator)) return;
 
   let host = '', pathname = '';
   try {
@@ -160,10 +294,11 @@ function handleRequest(details) {
   const transport = isGoogleHost(host) ? 'google' : 'first-party';
 
   const { em, eme, queryParams, bodyParams } = extractAllParams(details.url, details.requestBody);
+  const userData = extractUserData(details.url, details.requestBody);
 
   if (transport === 'first-party') {
     const hasPathMarker = /\/(ccm|pagead|g\/collect)(\/|$)/.test(pathname);
-    if (!hasPathMarker && !em && !eme) return;
+    if (!hasPathMarker && !em && !eme && !userData) return;
   }
 
   const source = classifySource(host, pathname);
@@ -175,6 +310,7 @@ function handleRequest(details) {
     method: details.method,
     em,
     eme,
+    userData,
     queryParams,
     bodyParams,
     truncated: false,
@@ -214,6 +350,31 @@ chrome.runtime.onInstalled.addListener(refreshListener);
 chrome.runtime.onStartup.addListener(refreshListener);
 
 refreshListener();
+
+// Side-panel lifecycle: each opened panel connects via a long-lived port.
+// When the port disconnects (panel closed) and the panel has the auto-stop
+// option enabled, we stop recording. The option is communicated through the
+// port so the SW does not need to read it from storage on every disconnect.
+const panelPorts = new Map(); // port -> { autoStop: boolean }
+
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name !== 'panel') return;
+  panelPorts.set(port, { autoStop: true });
+  port.onMessage.addListener((msg) => {
+    if (!msg || msg.type !== 'panelOption') return;
+    const entry = panelPorts.get(port);
+    if (entry) entry.autoStop = !!msg.autoStop;
+  });
+  port.onDisconnect.addListener(() => {
+    const entry = panelPorts.get(port);
+    panelPorts.delete(port);
+    if (!entry || !entry.autoStop) return;
+    if (!state.recording) return;
+    state.recording = false;
+    persist();
+    broadcast({ type: 'stateChanged', recording: false });
+  });
+});
 
 chrome.runtime.onMessage.addListener((msg, sender, respond) => {
   if (!msg || !msg.type) return;

@@ -102,6 +102,7 @@
     .cap-pill.identifier-name  { background: #fce7f3; color: #9d174d; }
     .cap-pill.identifier-addr  { background: #fef3c7; color: #92400e; }
     .cap-pill.identifier-eme   { background: #fef3c7; color: #92400e; }
+    .cap-pill.source-userdata  { background: #e2e8f0; color: #475569; }
     .cap-pill.none { background: #f1f5f9; color: #94a3b8; }
     .cap-empty { text-align: center; padding: 16px 15px; color: var(--muted); font-size: 11px; font-style: italic; }
 
@@ -159,7 +160,8 @@
     <div class="rec-row">
       <input type="text" id="recUrl" placeholder="https://example.com/* (origin to monitor)">
       <button id="recUrlReload" class="icon-btn" title="Reload from active tab" aria-label="Reload URL from active tab">↻</button>
-      <button id="recToggle" class="primary">Permit &amp; Record</button>
+      <button id="recPermit" title="Grant access to this origin (independent of recording state)">Permit</button>
+      <button id="recToggle" class="primary" title="Start or stop capturing — works on already-permitted origins">Start</button>
     </div>
     <div class="rec-row" style="margin-top:8px; justify-content:space-between;">
       <span class="rec-status"><span id="recDot" class="rec-dot"></span><span id="recStatusText">idle</span></span>
@@ -172,14 +174,27 @@
     <div class="rec-row" style="margin-top:6px;">
       <label class="rec-filter">
         <input type="checkbox" id="recFilterEm" checked>
-        Show only requests with <code>em</code>
+        Show only requests with user data
       </label>
     </div>
     <div class="rec-row" style="margin-top:6px;">
       <label class="rec-filter">
         <input type="checkbox" id="recFilterGa" checked>
-        Show also Google Analytics requests with EM
-        <span class="rec-filter-info" title="Standard GA4 endpoints are detected directly. Tag Gateway and server-side GTM are captured as soon as the respective origin is granted via 'Permit &amp; Record' above — requests carrying an encrypted eme parameter are flagged but cannot be decoded." aria-label="Info about limitations">i</span>
+        Show also Google Analytics requests with user data
+        <span class="rec-filter-info" title="Standard GA4 endpoints are detected directly. Tag Gateway and server-side GTM are captured as soon as the respective origin is granted via the Permit button above. User data is recognized either from the em/eme parameter or from ep.user_data.* event parameters (also via JSON body in sGTM requests)." aria-label="Info about limitations">i</span>
+      </label>
+    </div>
+    <div class="rec-row" style="margin-top:6px;">
+      <label class="rec-filter">
+        <input type="checkbox" id="recIncludeSubs">
+        Include subdomains when permitting
+        <span class="rec-filter-info" title="When on, the Permit button requests a wildcard pattern for the base domain (e.g. https://*.example.com/*) instead of just the current host. Useful for shops with multiple subdomains or a first-party sGTM on its own subdomain. Chrome will show a broader permission dialog — review carefully before granting.">i</span>
+      </label>
+    </div>
+    <div class="rec-row" style="margin-top:6px;">
+      <label class="rec-filter">
+        <input type="checkbox" id="recAutoStop" checked>
+        Stop recording when side panel closes
       </label>
     </div>
     <div id="recError" class="rec-error" hidden></div>

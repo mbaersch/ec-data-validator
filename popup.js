@@ -573,6 +573,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // ---------- Capture / Recording ----------
 
     const recUrl        = document.getElementById('recUrl');
+    const recPermit     = document.getElementById('recPermit');
     const recToggle     = document.getElementById('recToggle');
     const recDot        = document.getElementById('recDot');
     const recStatusText = document.getElementById('recStatusText');
@@ -580,6 +581,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const recRing       = document.getElementById('recRing');
     const recClear      = document.getElementById('recClear');
     const recError      = document.getElementById('recError');
+    const recAutoStop   = document.getElementById('recAutoStop');
+    const recIncludeSubs = document.getElementById('recIncludeSubs');
     const capList       = document.getElementById('capList');
     const capEmpty      = document.getElementById('capEmpty');
 
@@ -611,6 +614,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let recording = false;
     let filterEmOnly = true;
     let filterIncludeGa = true;
+    let includeSubdomains = false;
 
     function normalizeOrigin(input) {
         if (!input) return null;
@@ -621,6 +625,23 @@ document.addEventListener('DOMContentLoaded', () => {
             const u = new URL(s);
             return `${u.protocol}//${u.host}/*`;
         } catch (e) { return null; }
+    }
+
+    // When the "include subdomains" toggle is on, broaden the origin to a
+    // wildcard match for the base domain. Heuristic: keep the last two host
+    // labels (works for most TLDs; fails for multi-label public suffixes like
+    // .co.uk — the user can edit the URL field to override). Chrome match
+    // patterns of the form *.example.com also cover the apex example.com.
+    function normalizeOriginForPermit(input) {
+        const o = normalizeOrigin(input);
+        if (!o) return null;
+        if (!includeSubdomains) return o;
+        try {
+            const u = new URL(o);
+            const parts = u.host.split('.');
+            const base = parts.length <= 2 ? u.host : parts.slice(-2).join('.');
+            return `${u.protocol}//*.${base}/*`;
+        } catch (e) { return o; }
     }
 
     function shortenUrl(url, host) {
@@ -635,61 +656,107 @@ document.addEventListener('DOMContentLoaded', () => {
         return d.toLocaleTimeString('de-DE', { hour12: false }) + '.' + String(d.getMilliseconds()).padStart(3, '0');
     }
 
-    function renderPills(em, eme) {
-        if (!em && eme) {
-            return '<span class="cap-pill identifier-eme" title="Encrypted parameter — cannot decode here">eme</span>';
-        }
-        if (!em && !eme) {
-            return '<span class="cap-pill none" title="No em or eme parameter in this request">no em</span>';
-        }
+    // Map nested user_data keys to the same pill tokens used for em parsing,
+    // so user_data captures display the same identifier vocabulary.
+    const USERDATA_KEY_TO_PILL = {
+        email: 'em', email_address: 'em', sha256_email_address: 'em',
+        phone_number: 'pn', sha256_phone_number: 'pn',
+        first_name: 'fn0', sha256_first_name: 'fn0',
+        last_name: 'ln0', sha256_last_name: 'ln0',
+        street: 'sa0', sha256_street: 'sa0',
+        city: 'ct0',
+        region: 'st0',
+        postal_code: 'zp0',
+        country: 'co0'
+    };
 
-        const counts = {};
-        let s = em.trim();
-        try { s = decodeURIComponent(s); } catch (e) { /* ignore */ }
-        if (s.startsWith('em=')) s = s.substring(3);
-        s.split('~').forEach(p => {
-            const i = p.indexOf('.');
-            if (i === -1) return;
-            const k = p.substring(0, i);
-            counts[k] = (counts[k] || 0) + 1;
+    function collectUserDataKeys(node, out) {
+        if (!node || typeof node !== 'object') return out;
+        if (Array.isArray(node)) { node.forEach(n => collectUserDataKeys(n, out)); return out; }
+        Object.keys(node).forEach(k => {
+            out.add(k);
+            if (node[k] && typeof node[k] === 'object') collectUserDataKeys(node[k], out);
         });
-        const keys = new Set(Object.keys(counts));
-        const ordered = PILL_ORDER.filter(k => keys.has(k));
+        return out;
+    }
 
-        let pills;
-        if (ordered.length === 0) {
-            pills = ['<span class="cap-pill none" title="em present but no recognized identifier tokens">no identifiers</span>'];
-        } else {
-            let addrCount = 1;
-            for (const k of keys) {
-                const m = k.match(/^(fn|ln|sa|ct|st|zp|pc|rg|co)(\d+)$/);
-                if (m) addrCount = Math.max(addrCount, parseInt(m[2], 10) + 1);
-            }
-            pills = ordered.map(k => {
-                const cls = PILL_CLASS[k] || '';
-                const label = PILL_LABEL[k] || k;
-                let display = k, tip = label;
-                if ((k === 'em' || k === 'pn') && counts[k] > 1) {
-                    display = `${k} +${counts[k] - 1}`;
-                    tip = `${label} (${counts[k]} total)`;
-                }
-                return `<span class="cap-pill ${cls}" title="${tip}">${display}</span>`;
+    function userDataMarkerPill(userData) {
+        return userData
+            ? '<span class="cap-pill source-userdata" title="Request also carries user_data event parameters (ep.user_data.*) — click switches to em decoder when em is present, otherwise to Object Analysis">user_data</span>'
+            : '';
+    }
+
+    function renderPills(em, eme, userData) {
+        const pills = [];
+
+        if (em) {
+            const counts = {};
+            let s = em.trim();
+            try { s = decodeURIComponent(s); } catch (e) { /* ignore */ }
+            if (s.startsWith('em=')) s = s.substring(3);
+            s.split('~').forEach(p => {
+                const i = p.indexOf('.');
+                if (i === -1) return;
+                const k = p.substring(0, i);
+                counts[k] = (counts[k] || 0) + 1;
             });
-            if (addrCount > 1) {
-                pills.push(`<span class="cap-pill identifier-addr" title="${addrCount} addresses total">+${addrCount - 1} addr</span>`);
+            const keys = new Set(Object.keys(counts));
+            const ordered = PILL_ORDER.filter(k => keys.has(k));
+
+            if (ordered.length === 0) {
+                pills.push('<span class="cap-pill none" title="em present but no recognized identifier tokens">no identifiers</span>');
+            } else {
+                let addrCount = 1;
+                for (const k of keys) {
+                    const m = k.match(/^(fn|ln|sa|ct|st|zp|pc|rg|co)(\d+)$/);
+                    if (m) addrCount = Math.max(addrCount, parseInt(m[2], 10) + 1);
+                }
+                ordered.forEach(k => {
+                    const cls = PILL_CLASS[k] || '';
+                    const label = PILL_LABEL[k] || k;
+                    let display = k, tip = label;
+                    if ((k === 'em' || k === 'pn') && counts[k] > 1) {
+                        display = `${k} +${counts[k] - 1}`;
+                        tip = `${label} (${counts[k]} total)`;
+                    }
+                    pills.push(`<span class="cap-pill ${cls}" title="${tip}">${display}</span>`);
+                });
+                if (addrCount > 1) {
+                    pills.push(`<span class="cap-pill identifier-addr" title="${addrCount} addresses total">+${addrCount - 1} addr</span>`);
+                }
             }
+            if (eme) pills.push('<span class="cap-pill identifier-eme" title="Also carries encrypted eme — cannot decode">eme</span>');
+            pills.push(userDataMarkerPill(userData));
+            return pills.filter(Boolean).join('');
         }
 
         if (eme) {
-            pills.push('<span class="cap-pill identifier-eme" title="Also carries encrypted eme — cannot decode">eme</span>');
+            pills.push('<span class="cap-pill identifier-eme" title="Encrypted parameter — cannot decode here">eme</span>');
+            pills.push(userDataMarkerPill(userData));
+            return pills.filter(Boolean).join('');
         }
-        return pills.join('');
+
+        if (userData) {
+            const keys = collectUserDataKeys(userData, new Set());
+            const mapped = new Set();
+            keys.forEach(k => { if (USERDATA_KEY_TO_PILL[k]) mapped.add(USERDATA_KEY_TO_PILL[k]); });
+            const ordered = PILL_ORDER.filter(k => mapped.has(k));
+            ordered.forEach(k => {
+                const cls = PILL_CLASS[k] || '';
+                const label = PILL_LABEL[k] || k;
+                pills.push(`<span class="cap-pill ${cls}" title="${label} (from user_data)">${k}</span>`);
+            });
+            pills.push(userDataMarkerPill(userData));
+            return pills.filter(Boolean).join('');
+        }
+
+        return '<span class="cap-pill none" title="No em, eme or user_data found in this request">no user data</span>';
     }
 
     function renderCaptures() {
         recCount.textContent = captures.length;
         const visible = captures.filter(c => {
-            if (filterEmOnly && !c.em && !c.eme) return false;
+            if (filterEmOnly && !c.em && !c.eme && !c.userData) return false;
             if (!filterIncludeGa && (c.source || 'ads') === 'ga') return false;
             return true;
         });
@@ -702,7 +769,7 @@ document.addEventListener('DOMContentLoaded', () => {
             } else if (!filterIncludeGa && captures.every(c => (c.source || 'ads') === 'ga')) {
                 capEmpty.textContent = 'Only GA captures present — enable the GA filter to see them.';
             } else {
-                capEmpty.textContent = 'No captures with em or eme — uncheck the filter to see all requests.';
+                capEmpty.textContent = 'No captures with user data — uncheck the filter to see all requests.';
             }
             return;
         }
@@ -710,7 +777,7 @@ document.addEventListener('DOMContentLoaded', () => {
         capEmpty.hidden = true;
         capList.innerHTML = visible.slice().reverse().map(c => {
             const realIdx = captures.indexOf(c);
-            const hasIdentifier = !!(c.em || c.eme);
+            const hasIdentifier = !!(c.em || c.eme || c.userData);
             const transport = c.transport || 'google';
             const source = c.source || 'ads';
             return `<div class="cap-card ${hasIdentifier ? '' : 'no-em'} source-${source} transport-${transport}" data-idx="${realIdx}">
@@ -720,7 +787,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <span class="cap-method">${c.method}</span>
                     <span class="cap-host">${shortenUrl(c.url, c.host)}</span>
                 </div>
-                <div class="cap-card-pills">${renderPills(c.em, c.eme)}</div>
+                <div class="cap-card-pills">${renderPills(c.em, c.eme, c.userData)}</div>
             </div>`;
         }).join('');
         capList.querySelectorAll('.cap-card').forEach(card => {
@@ -728,16 +795,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 const idx = Number(card.dataset.idx);
                 const cap = captures[idx];
                 if (!cap) return;
-                let inputValue = null;
-                if (cap.em) {
-                    inputValue = cap.em;
-                } else if (cap.eme) {
-                    inputValue = 'eme=' + cap.eme;
+                if (cap.em || cap.eme) {
+                    emInput.value = cap.em ? cap.em : 'eme=' + cap.eme;
+                    activateTab('tab-em');
+                    chrome.storage.local.set({ activeTab: 'tab-em' });
+                    runUpdate();
+                    emInput.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                } else if (cap.userData) {
+                    objInput.value = JSON.stringify({ user_data: cap.userData }, null, 2);
+                    activateTab('tab-obj');
+                    chrome.storage.local.set({ activeTab: 'tab-obj' });
+                    runUpdate();
+                    objInput.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
                 }
-                if (!inputValue) return;
-                emInput.value = inputValue;
-                runUpdate();
-                emInput.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
             });
         });
         capList.querySelectorAll('.cap-detail-btn').forEach(btn => {
@@ -756,14 +826,14 @@ document.addEventListener('DOMContentLoaded', () => {
         recording = rec;
         recDot.classList.toggle('live', rec);
         recStatusText.textContent = rec ? 'recording' : 'idle';
-        recToggle.textContent = rec ? 'Stop' : 'Permit & Record';
+        recToggle.textContent = rec ? 'Stop' : 'Start';
         recToggle.classList.toggle('primary', !rec);
         recToggle.classList.toggle('danger', rec);
-        recUrl.disabled = rec;
-        recUrlReload.disabled = rec;
     }
 
-    function fillUrlFromActiveTab() {
+    function fillUrlFromActiveTab(opts) {
+        const respectFocus = !!(opts && opts.respectFocus);
+        if (respectFocus && document.activeElement === recUrl) return;
         try {
             chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
                 if (tabs && tabs[0] && tabs[0].url) {
@@ -772,6 +842,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         if (u.protocol.startsWith('http')) {
                             recUrl.value = `${u.protocol}//${u.host}/*`;
                             showError('');
+                            refreshPermitButton();
                         }
                     } catch (e) {}
                 }
@@ -779,10 +850,20 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (e) {}
     }
 
-    recUrlReload.addEventListener('click', () => {
-        if (recording) return;
-        fillUrlFromActiveTab();
-    });
+    recUrl.addEventListener('input', () => refreshPermitButton());
+
+    recUrlReload.addEventListener('click', () => fillUrlFromActiveTab());
+
+    // Auto-update URL field when the user switches tabs or navigates the active
+    // tab — only when the field is not currently focused (respect user edits).
+    try {
+        chrome.tabs.onActivated.addListener(() => fillUrlFromActiveTab({ respectFocus: true }));
+        chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+            if (!changeInfo.url) return;
+            if (!tab || !tab.active) return;
+            fillUrlFromActiveTab({ respectFocus: true });
+        });
+    } catch (e) { /* tabs API unavailable */ }
 
     function showError(msg) {
         if (!msg) { recError.hidden = true; recError.textContent = ''; return; }
@@ -790,9 +871,39 @@ document.addEventListener('DOMContentLoaded', () => {
         recError.textContent = msg;
     }
 
-    async function startRecordingFlow() {
+    async function isOriginPermitted(origin) {
+        if (!origin) return false;
+        try {
+            return await chrome.permissions.contains({ origins: [origin] });
+        } catch (e) {
+            return false;
+        }
+    }
+
+    async function refreshPermitButton() {
+        const checkOrigin = normalizeOrigin(recUrl.value);
+        if (!checkOrigin) {
+            recPermit.textContent = 'Permit';
+            recPermit.disabled = true;
+            recPermit.title = 'Enter an origin to permit';
+            return;
+        }
+        const permitted = await isOriginPermitted(checkOrigin);
+        if (permitted) {
+            recPermit.textContent = 'Permitted ✓';
+            recPermit.disabled = true;
+            recPermit.title = checkOrigin + ' is already covered by an existing permission';
+        } else {
+            const permitOrigin = normalizeOriginForPermit(recUrl.value) || checkOrigin;
+            recPermit.textContent = 'Permit';
+            recPermit.disabled = false;
+            recPermit.title = 'Grant access to ' + permitOrigin;
+        }
+    }
+
+    async function permitFlow() {
         showError('');
-        const origin = normalizeOrigin(recUrl.value);
+        const origin = normalizeOriginForPermit(recUrl.value);
         if (!origin) {
             showError('Invalid URL — provide e.g. https://example.com');
             return;
@@ -800,13 +911,30 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const granted = await chrome.permissions.request({ origins: [origin] });
             if (!granted) {
-                showError('Permission denied — recording cannot start without site access.');
+                showError('Permission denied for ' + origin);
                 return;
             }
             refreshPermList();
+            refreshPermitButton();
         } catch (e) {
             showError('Permission request failed: ' + e.message);
-            return;
+        }
+    }
+
+    async function startRecordingFlow() {
+        showError('');
+        const raw = recUrl.value.trim();
+        if (raw) {
+            const origin = normalizeOrigin(raw);
+            if (!origin) {
+                showError('Invalid URL — provide e.g. https://example.com, or clear the field to capture only the standard Google endpoints.');
+                return;
+            }
+            const permitted = await isOriginPermitted(origin);
+            if (!permitted) {
+                showError('Site not permitted — click Permit first, or clear the URL field to capture only the standard Google endpoints.');
+                return;
+            }
         }
         chrome.runtime.sendMessage({ type: 'startRecording' }, (res) => {
             if (res && res.ok) setRecordingUI(true);
@@ -819,6 +947,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    recPermit.addEventListener('click', permitFlow);
     recToggle.addEventListener('click', () => {
         if (recording) stopRecordingFlow();
         else startRecordingFlow();
@@ -851,7 +980,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const recExport = document.getElementById('recExport');
     recExport.addEventListener('click', async () => {
-        const exportSet = filterEmOnly ? captures.filter(c => !!(c.em || c.eme)) : captures;
+        const exportSet = filterEmOnly ? captures.filter(c => !!(c.em || c.eme || c.userData)) : captures;
         if (exportSet.length === 0) {
             showError('Nothing to export.');
             setTimeout(() => showError(''), 2000);
@@ -859,7 +988,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         const payload = {
             exportedAt: new Date().toISOString(),
-            filter: filterEmOnly ? 'em-only' : 'all',
+            filter: filterEmOnly ? 'user-data-only' : 'all',
             count: exportSet.length,
             captures: exportSet.map(c => ({
                 ts: c.ts,
@@ -869,6 +998,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 url: c.url,
                 em: c.em,
                 eme: c.eme || null,
+                userData: c.userData || null,
                 source: c.source || 'ads',
                 transport: c.transport || 'google'
             }))
@@ -901,13 +1031,41 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // Initial state pull from background + filter persistence
-    chrome.storage.local.get(['recFilterEm', 'recFilterGa'], (res) => {
+    chrome.storage.local.get(['recFilterEm', 'recFilterGa', 'recAutoStop', 'recIncludeSubs'], (res) => {
         // Default to true if never set
         filterEmOnly = (res.recFilterEm === undefined) ? true : !!res.recFilterEm;
         filterIncludeGa = (res.recFilterGa === undefined) ? true : !!res.recFilterGa;
+        const autoStop = (res.recAutoStop === undefined) ? true : !!res.recAutoStop;
+        includeSubdomains = !!res.recIncludeSubs;
         recFilterEm.checked = filterEmOnly;
         recFilterGa.checked = filterIncludeGa;
+        recAutoStop.checked = autoStop;
+        recIncludeSubs.checked = includeSubdomains;
+        sendAutoStopOption(autoStop);
+        refreshPermitButton();
         renderCaptures();
+    });
+
+    // Long-lived port — the SW uses port.onDisconnect to detect panel close
+    // and stops recording when the user has the auto-stop option enabled.
+    let panelPort = null;
+    try { panelPort = chrome.runtime.connect({ name: 'panel' }); } catch (e) { panelPort = null; }
+
+    function sendAutoStopOption(autoStop) {
+        if (!panelPort) return;
+        try { panelPort.postMessage({ type: 'panelOption', autoStop: !!autoStop }); } catch (e) {}
+    }
+
+    recAutoStop.addEventListener('change', () => {
+        const v = recAutoStop.checked;
+        chrome.storage.local.set({ recAutoStop: v });
+        sendAutoStopOption(v);
+    });
+
+    recIncludeSubs.addEventListener('change', () => {
+        includeSubdomains = recIncludeSubs.checked;
+        chrome.storage.local.set({ recIncludeSubs: includeSubdomains });
+        refreshPermitButton();
     });
 
     chrome.runtime.sendMessage({ type: 'getState' }, (res) => {
@@ -1049,7 +1207,8 @@ document.addEventListener('DOMContentLoaded', () => {
       });
     }
 
-    chrome.permissions.onAdded.addListener(refreshPermList);
-    chrome.permissions.onRemoved.addListener(refreshPermList);
+    chrome.permissions.onAdded.addListener(() => { refreshPermList(); refreshPermitButton(); });
+    chrome.permissions.onRemoved.addListener(() => { refreshPermList(); refreshPermitButton(); });
     refreshPermList();
+    refreshPermitButton();
 });
