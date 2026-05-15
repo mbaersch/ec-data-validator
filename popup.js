@@ -88,13 +88,25 @@ document.addEventListener('DOMContentLoaded', () => {
     const objInput = document.getElementById('objInput');
 
     // Tabs
-    function activateTab(targetId) {
+    const objBackBtn = document.getElementById('objBackBtn');
+    let backReturnTab = null; // set when navigation comes from a capture card
+
+    function updateBackBtn() {
+        if (!objBackBtn) return;
+        const onObj = getActiveTabId() === 'tab-obj';
+        objBackBtn.hidden = !(onObj && backReturnTab);
+    }
+
+    function activateTab(targetId, opts) {
         const tab = document.querySelector(`.tab[data-target="${targetId}"]`);
         const pane = document.getElementById(targetId);
         if (!tab || !pane) return;
         document.querySelectorAll('.tab, .content').forEach(el => el.classList.remove('active'));
         tab.classList.add('active');
         pane.classList.add('active');
+        // Manual navigation clears any pending back-link; card-driven navigation preserves it.
+        if (!opts || opts.source !== 'card') backReturnTab = null;
+        updateBackBtn();
     }
 
     function getActiveTabId() {
@@ -109,6 +121,15 @@ document.addEventListener('DOMContentLoaded', () => {
             runUpdate();
         });
     });
+
+    if (objBackBtn) {
+        objBackBtn.addEventListener('click', () => {
+            const target = backReturnTab || 'tab-em';
+            activateTab(target);
+            chrome.storage.local.set({ activeTab: target });
+            runUpdate();
+        });
+    }
 
     async function sha256(msg) {
         if (!msg || msg.trim() === '') return null;
@@ -566,27 +587,14 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         runUpdate();
-        // Re-sync clear-link disabled state — storage load fires after the
-        // initial setup below and does not emit input events for the
-        // programmatic assignment.
-        document.querySelectorAll('.input-clear').forEach(btn => {
-            const target = document.getElementById(btn.dataset.target);
-            if (target) btn.disabled = target.value.length === 0;
-        });
     });
 
     [emInput, objInput].forEach(el => el.addEventListener('input', runUpdate));
 
-    // Clear links next to the textarea labels — disabled when the textarea is
-    // already empty so the affordance disappears when there's nothing to clear.
     document.querySelectorAll('.input-clear').forEach(btn => {
         const target = document.getElementById(btn.dataset.target);
         if (!target) return;
-        const sync = () => { btn.disabled = target.value.length === 0; };
-        sync();
-        target.addEventListener('input', sync);
         btn.addEventListener('click', () => {
-            if (target.value === '') return;
             target.value = '';
             target.dispatchEvent(new Event('input', { bubbles: true }));
             target.focus();
@@ -915,7 +923,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     emInput.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
                 } else if (cap.userData) {
                     objInput.value = JSON.stringify({ user_data: cap.userData }, null, 2);
-                    activateTab('tab-obj');
+                    backReturnTab = getActiveTabId();
+                    activateTab('tab-obj', { source: 'card' });
                     chrome.storage.local.set({ activeTab: 'tab-obj' });
                     runUpdate();
                     objInput.scrollIntoView({ behavior: 'smooth', block: 'nearest' });

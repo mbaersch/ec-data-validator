@@ -14,6 +14,20 @@
     .tabs { display: flex; background: #202124; position: sticky; top: 0; z-index: 100; }
     .tab { flex: 1; padding: 12px; text-align: center; color: #9aa0a6; cursor: pointer; font-size: 13px; font-weight: bold; transition: 0.2s; border-bottom: 3px solid transparent; }
     .tab.active { color: white; border-bottom-color: var(--primary); background: #292a2d; }
+    .tab.tab-icon { flex: 0 0 44px; font-size: 16px; padding: 12px 0; }
+
+    .settings-list { display: flex; flex-direction: column; gap: 10px; }
+    .settings-item { display: flex; align-items: flex-start; gap: 10px; background: #fff; border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; cursor: pointer; transition: border-color 0.15s; text-transform: none; letter-spacing: normal; font-weight: normal; color: var(--text); margin-bottom: 0; }
+    .settings-item:hover { border-color: var(--primary); }
+    .settings-item input[type="checkbox"] { width: 16px; height: 16px; margin: 2px 0 0; flex: 0 0 auto; accent-color: var(--primary); cursor: pointer; }
+    .settings-text { flex: 1; min-width: 0; }
+    .settings-label { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 4px; text-transform: none; letter-spacing: normal; }
+    .settings-desc { font-size: 12px; color: #64748b; line-height: 1.5; text-transform: none; letter-spacing: normal; font-weight: normal; }
+    .settings-desc code { font-size: 11px; }
+
+    .back-btn { display: inline-flex; align-items: center; gap: 4px; background: var(--secondary); color: #fff; border: none; border-radius: 6px; padding: 7px 12px; font-size: 12px; font-weight: 600; cursor: pointer; margin: 0 0 12px; font-family: inherit; transition: filter 0.15s; }
+    .back-btn[hidden] { display: none; }
+    .back-btn:hover { filter: brightness(1.1); }
     .content { padding: 15px; display: none; }
     .content.active { display: block; }
     
@@ -22,13 +36,13 @@
     .input-label-row { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 5px; }
     .input-label-row label { margin-bottom: 0; }
     .input-clear { background: none; border: none; padding: 0; font: inherit; font-size: 10px; color: #94a3b8; cursor: pointer; text-transform: none; letter-spacing: 0; font-weight: 400; }
-    .input-clear:hover:not(:disabled) { color: var(--primary); text-decoration: underline; }
-    .input-clear:disabled { opacity: 0.4; cursor: default; }
+    .input-clear:hover { color: var(--primary); text-decoration: underline; }
     textarea { width: 100%; height: 130px; box-sizing: border-box; border: 1px solid var(--border); border-radius: 6px; padding: 10px; font-family: 'Fira Code', 'Consolas', monospace; font-size: 11px; resize: none; background: #fff; transition: border-color 0.2s; }
     textarea:focus { outline: none; border-color: var(--primary); }
     
     .verification-box { margin: 15px; background: white; padding: 15px; border-radius: 12px; border: 1px solid var(--border); box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); }
     .verification-box.hidden { display: none; }
+    #tab-settings.active ~ #vBox { display: none; }
     .v-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
     input { width: 100%; padding: 8px 12px; margin-bottom: 8px; border: 1px solid var(--border); border-radius: 6px; box-sizing: border-box; font-size: 12px; }
     input:focus { outline: none; border-color: var(--secondary); }
@@ -79,9 +93,6 @@
     .rec-dot.live { background: #dc2626; box-shadow: 0 0 0 0 rgba(220,38,38,0.5); animation: rec-pulse 1.5s infinite; }
     @keyframes rec-pulse { 0% { box-shadow: 0 0 0 0 rgba(220,38,38,0.5); } 70% { box-shadow: 0 0 0 6px rgba(220,38,38,0); } 100% { box-shadow: 0 0 0 0 rgba(220,38,38,0); } }
     .rec-error { font-size: 11px; color: #991b1b; margin-top: 6px; }
-    .rec-filter { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); cursor: pointer; user-select: none; }
-    .rec-filter input { width: 14px; height: 14px; margin: 0; accent-color: var(--primary); cursor: pointer; }
-    .rec-filter code { font-size: 11px; }
 
     .cap-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; margin: 12px 15px 0; }
     .cap-list[hidden] { display: none; }
@@ -94,8 +105,6 @@
     .cap-card.source-ga { border-left: 3px solid #7c3aed; padding-left: 8px; }
     .cap-card.transport-first-party { background: #fff7ed; }
     .cap-card.transport-first-party:hover { background: #fef0e0; border-color: var(--primary); }
-    .rec-filter-info { display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; border-radius: 50%; background: #f1f5f9; color: #64748b; font-size: 9px; font-style: italic; font-weight: 700; font-family: serif; cursor: help; margin-left: 4px; line-height: 1; }
-    .rec-filter-info:hover { background: var(--primary); color: #fff; }
     .cap-card-head { display: flex; gap: 6px; align-items: baseline; font-family: 'Fira Code', 'Consolas', monospace; font-size: 10px; color: var(--muted); margin-bottom: 6px; flex-wrap: wrap; }
     .cap-time { color: var(--text); }
     .cap-method { font-weight: 700; color: var(--secondary); font-size: 9px; }
@@ -168,6 +177,7 @@
 <div class="tabs">
   <div class="tab active" data-target="tab-em">EM Decoder</div>
   <div class="tab" data-target="tab-obj">Object Analysis</div>
+  <div class="tab tab-icon" data-target="tab-settings" title="Settings" aria-label="Settings">⚙</div>
 </div>
 
 <div id="tab-em" class="content active">
@@ -198,39 +208,6 @@
         <button id="recClear" class="danger">Clear</button>
       </div>
     </div>
-    <div class="rec-row" style="margin-top:6px;">
-      <label class="rec-filter">
-        <input type="checkbox" id="recFilterEm" checked>
-        Show only requests with user data
-      </label>
-    </div>
-    <div class="rec-row" style="margin-top:6px;">
-      <label class="rec-filter">
-        <input type="checkbox" id="recFilterGa" checked>
-        Show also Google Analytics requests with user data
-        <span class="rec-filter-info" title="Standard GA4 endpoints are detected directly. Tag Gateway and server-side GTM are captured as soon as the respective origin is granted via the Permit button above. User data is recognized either from the em/eme parameter or from ep.user_data.* event parameters (also via JSON body in sGTM requests)." aria-label="Info about limitations">i</span>
-      </label>
-    </div>
-    <div class="rec-row" style="margin-top:6px;">
-      <label class="rec-filter">
-        <input type="checkbox" id="recIncludeSubs">
-        Include subdomains when permitting
-        <span class="rec-filter-info" title="When on, the Permit button requests a wildcard pattern for the base domain (e.g. https://*.example.com/*) instead of just the current host. Useful for shops with multiple subdomains or a first-party sGTM on its own subdomain. Chrome will show a broader permission dialog — review carefully before granting.">i</span>
-      </label>
-    </div>
-    <div class="rec-row" style="margin-top:6px;">
-      <label class="rec-filter">
-        <input type="checkbox" id="recAutoStop" checked>
-        Stop recording when side panel closes
-      </label>
-    </div>
-    <div class="rec-row" style="margin-top:6px;">
-      <label class="rec-filter">
-        <input type="checkbox" id="recUdIndicator">
-        Show user-data indicator on extension icon
-        <span class="rec-filter-info" title="When on, the toolbar icon shows a pill (ud / eme / em) whenever a standard Google endpoint on the current tab receives user data — independent of recording. Only the built-in Google endpoints (googleadservices.com, google.com/ccm|pagead, google-analytics.com /g/collect) are monitored — never your additional permitted first-party origins. Priority: ud (full user_data) > eme (decoded enhanced match) > em (hashed identifier). Resets on every tab navigation (including SPA route changes).">i</span>
-      </label>
-    </div>
     <div id="recError" class="rec-error" hidden></div>
   </div>
 
@@ -253,6 +230,7 @@
 </div>
 
 <div id="tab-obj" class="content">
+  <button id="objBackBtn" class="back-btn" hidden type="button">← Back to captures</button>
   <div class="intro">
     <p>Inspect a <code>user_data</code> object from <code>dataLayer.push</code>, <code>gtag()</code>, or raw JSON.</p>
     <details>
@@ -273,6 +251,54 @@
     <textarea id="objInput" placeholder="{ user_data: { sha256_email_address: '...' } }"></textarea>
   </div>
   <div id="objResult"></div>
+</div>
+
+<div id="tab-settings" class="content">
+  <div class="intro">
+    <p>Configure capture filters, permission behavior, and the toolbar indicator.</p>
+  </div>
+
+  <div class="settings-list">
+    <label class="settings-item">
+      <input type="checkbox" id="recFilterEm" checked>
+      <div class="settings-text">
+        <div class="settings-label">Show only requests with user data</div>
+        <div class="settings-desc">When enabled, the capture list hides requests that don't carry any identifier — keeps the view focused on what's relevant for validation.</div>
+      </div>
+    </label>
+
+    <label class="settings-item">
+      <input type="checkbox" id="recFilterGa" checked>
+      <div class="settings-text">
+        <div class="settings-label">Show also Google Analytics requests with user data</div>
+        <div class="settings-desc">Standard GA4 endpoints are detected directly. Tag Gateway and server-side GTM are captured as soon as the respective origin is granted via the <strong>Permit</strong> button. User data is recognized either from the <code>em</code>/<code>eme</code> parameter or from <code>ep.user_data.*</code> event parameters (also via JSON body in sGTM requests).</div>
+      </div>
+    </label>
+
+    <label class="settings-item">
+      <input type="checkbox" id="recIncludeSubs">
+      <div class="settings-text">
+        <div class="settings-label">Include subdomains when permitting</div>
+        <div class="settings-desc">When on, the Permit button requests a wildcard pattern for the base domain (e.g. <code>https://*.example.com/*</code>) instead of just the current host. Useful for shops with multiple subdomains or a first-party sGTM on its own subdomain. Chrome will show a broader permission dialog — review carefully before granting.</div>
+      </div>
+    </label>
+
+    <label class="settings-item">
+      <input type="checkbox" id="recAutoStop" checked>
+      <div class="settings-text">
+        <div class="settings-label">Stop recording when side panel closes</div>
+        <div class="settings-desc">Automatically halts capture if you close the side panel. Disable this if you want recording to continue silently in the background.</div>
+      </div>
+    </label>
+
+    <label class="settings-item">
+      <input type="checkbox" id="recUdIndicator">
+      <div class="settings-text">
+        <div class="settings-label">Show user-data indicator on extension icon</div>
+        <div class="settings-desc">When on, the toolbar icon shows a pill (<code>ud</code> / <code>eme</code> / <code>em</code>) whenever a standard Google endpoint on the current tab receives user data — independent of recording. Only the built-in Google endpoints (<code>googleadservices.com</code>, <code>google.com/ccm|pagead</code>, <code>google-analytics.com /g/collect</code>) are monitored — never your additional permitted first-party origins. Priority: <code>ud</code> (full user_data) &gt; <code>eme</code> (decoded enhanced match) &gt; <code>em</code> (hashed identifier). Resets on every tab navigation (including SPA route changes).</div>
+      </div>
+    </label>
+  </div>
 </div>
 
 <div id="vBox" class="verification-box hidden">
