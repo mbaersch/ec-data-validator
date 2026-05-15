@@ -2,28 +2,97 @@
 <html>
 <head>
   <meta charset="UTF-8">
+  <script>
+    // Pre-hydration: pick the best-guess theme before the first paint so
+    // a stored "dark" preference (or a dark OS theme) does not flash light.
+    // popup.js will reconcile against chrome.storage as soon as it runs.
+    (function () {
+      try {
+        if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+          document.documentElement.setAttribute('data-theme', 'dark');
+        }
+      } catch (e) { /* noop */ }
+    })();
+  </script>
   <style>
     :root {
       --primary: #C44E00;
       --secondary: #005141;
       --bg: #f8fafc;
+      --surface: #ffffff;
+      --surface-alt: #f1f5f9;
+      --surface-warm: #fff7ed;
+      --surface-warm-hover: #fef0e0;
+      --surface-hover-primary: #fef9f4;
       --text: #1e293b;
+      --text-muted: #64748b;
+      --text-faint: #94a3b8;
+      --text-fainter: #cbd5e1;
+      --text-strong: #475569;
       --border: #e2e8f0;
+      --code-bg: #f1f5f9;
+      --tab-bg: #202124;
+      --tab-bg-active: #292a2d;
+      --tab-text: #9aa0a6;
+      --tab-text-active: #ffffff;
+      --shadow-soft: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+      --shadow-modal: 0 12px 32px rgba(0,0,0,0.25);
+      --modal-backdrop: rgba(0,0,0,0.4);
+      --revoke-hover-bg: #fef2f2;
+      --revoke-border-strong: #dc2626;
+      --danger-text: #991b1b;
+      --ui-scale: 1;
     }
+    html[data-theme="dark"] {
+      --bg: #0f1115;
+      --surface: #1c1f26;
+      --surface-alt: #262a33;
+      --surface-warm: #2a2218;
+      --surface-warm-hover: #332918;
+      --surface-hover-primary: #2a2018;
+      --text: #e2e8f0;
+      --text-muted: #94a3b8;
+      --text-faint: #64748b;
+      --text-fainter: #475569;
+      --text-strong: #cbd5e1;
+      --border: #2f3540;
+      --code-bg: #262a33;
+      --tab-bg: #0a0c10;
+      --tab-bg-active: #1c1f26;
+      --tab-text: #94a3b8;
+      --tab-text-active: #ffffff;
+      --shadow-soft: 0 4px 6px -1px rgb(0 0 0 / 0.35);
+      --shadow-modal: 0 12px 32px rgba(0,0,0,0.6);
+      --modal-backdrop: rgba(0,0,0,0.65);
+      --revoke-hover-bg: #3a1e1e;
+      --revoke-border-strong: #dc2626;
+      --danger-text: #f87171;
+    }
+    html { zoom: var(--ui-scale); }
     body { width: 100%; min-width: 320px; font-family: 'Segoe UI', system-ui, sans-serif; margin: 0; background: var(--bg); color: var(--text); min-height: 100vh; }
-    .tabs { display: flex; background: #202124; position: sticky; top: 0; z-index: 100; }
-    .tab { flex: 1; padding: 12px; text-align: center; color: #9aa0a6; cursor: pointer; font-size: 13px; font-weight: bold; transition: 0.2s; border-bottom: 3px solid transparent; }
-    .tab.active { color: white; border-bottom-color: var(--primary); background: #292a2d; }
+    .tabs { display: flex; background: var(--tab-bg); position: sticky; top: 0; z-index: 100; }
+    .tab { flex: 1; padding: 12px; text-align: center; color: var(--tab-text); cursor: pointer; font-size: 13px; font-weight: bold; transition: 0.2s; border-bottom: 3px solid transparent; }
+    .tab.active { color: var(--tab-text-active); border-bottom-color: var(--primary); background: var(--tab-bg-active); }
     .tab.tab-icon { flex: 0 0 44px; font-size: 16px; padding: 12px 0; }
 
+    .settings-section-title { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700; margin: 0 0 8px; }
+    .settings-section + .settings-section { margin-top: 18px; }
     .settings-list { display: flex; flex-direction: column; gap: 10px; }
-    .settings-item { display: flex; align-items: flex-start; gap: 10px; background: #fff; border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; cursor: pointer; transition: border-color 0.15s; text-transform: none; letter-spacing: normal; font-weight: normal; color: var(--text); margin-bottom: 0; }
+    .settings-item { display: flex; align-items: flex-start; gap: 10px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; cursor: pointer; transition: border-color 0.15s; text-transform: none; letter-spacing: normal; font-weight: normal; color: var(--text); margin-bottom: 0; }
     .settings-item:hover { border-color: var(--primary); }
     .settings-item input[type="checkbox"] { width: 16px; height: 16px; margin: 2px 0 0; flex: 0 0 auto; accent-color: var(--primary); cursor: pointer; }
     .settings-text { flex: 1; min-width: 0; }
     .settings-label { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 4px; text-transform: none; letter-spacing: normal; }
-    .settings-desc { font-size: 12px; color: #64748b; line-height: 1.5; text-transform: none; letter-spacing: normal; font-weight: normal; }
+    .settings-desc { font-size: 12px; color: var(--text-muted); line-height: 1.5; text-transform: none; letter-spacing: normal; font-weight: normal; }
     .settings-desc code { font-size: 11px; }
+
+    .settings-radio { display: flex; align-items: flex-start; gap: 10px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+    .settings-radio .settings-text { display: flex; flex-direction: column; }
+    .settings-radio .settings-options { display: inline-flex; margin-top: 6px; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; background: var(--surface-alt); width: max-content; }
+    .settings-radio .settings-options label { display: inline-flex; align-items: center; justify-content: center; padding: 5px 12px; font-size: 11px; font-weight: 600; color: var(--text-muted); cursor: pointer; text-transform: none; letter-spacing: normal; margin: 0; border-right: 1px solid var(--border); user-select: none; transition: background 0.1s, color 0.1s; }
+    .settings-radio .settings-options label:last-child { border-right: none; }
+    .settings-radio .settings-options input[type="radio"] { display: none; }
+    .settings-radio .settings-options label:has(input:checked) { background: var(--primary); color: #fff; }
 
     .back-btn { display: inline-flex; align-items: center; gap: 4px; background: var(--secondary); color: #fff; border: none; border-radius: 6px; padding: 7px 12px; font-size: 12px; font-weight: 600; cursor: pointer; margin: 0 0 12px; font-family: inherit; transition: filter 0.15s; }
     .back-btn[hidden] { display: none; }
@@ -32,28 +101,28 @@
     .content.active { display: block; }
     
     .input-group { margin-bottom: 15px; }
-    label { display: block; font-size: 10px; color: #64748b; text-transform: uppercase; margin-bottom: 5px; font-weight: 700; letter-spacing: 0.5px; }
+    label { display: block; font-size: 10px; color: var(--text-muted); text-transform: uppercase; margin-bottom: 5px; font-weight: 700; letter-spacing: 0.5px; }
     .input-label-row { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 5px; }
     .input-label-row label { margin-bottom: 0; }
-    .input-clear { background: none; border: none; padding: 0; font: inherit; font-size: 10px; color: #94a3b8; cursor: pointer; text-transform: none; letter-spacing: 0; font-weight: 400; }
+    .input-clear { background: none; border: none; padding: 0; font: inherit; font-size: 10px; color: var(--text-faint); cursor: pointer; text-transform: none; letter-spacing: 0; font-weight: 400; }
     .input-clear:hover { color: var(--primary); text-decoration: underline; }
-    textarea { width: 100%; height: 130px; box-sizing: border-box; border: 1px solid var(--border); border-radius: 6px; padding: 10px; font-family: 'Fira Code', 'Consolas', monospace; font-size: 11px; resize: none; background: #fff; transition: border-color 0.2s; }
+    textarea { width: 100%; height: 130px; box-sizing: border-box; border: 1px solid var(--border); border-radius: 6px; padding: 10px; font-family: 'Fira Code', 'Consolas', monospace; font-size: 11px; resize: none; background: var(--surface); color: var(--text); transition: border-color 0.2s; }
     textarea:focus { outline: none; border-color: var(--primary); }
-    
-    .verification-box { margin: 15px; background: white; padding: 15px; border-radius: 12px; border: 1px solid var(--border); box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); }
+
+    .verification-box { margin: 15px; background: var(--surface); padding: 15px; border-radius: 12px; border: 1px solid var(--border); box-shadow: var(--shadow-soft); }
     .verification-box.hidden { display: none; }
     #tab-settings.active ~ #vBox { display: none; }
     .v-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-    input { width: 100%; padding: 8px 12px; margin-bottom: 8px; border: 1px solid var(--border); border-radius: 6px; box-sizing: border-box; font-size: 12px; }
+    input { width: 100%; padding: 8px 12px; margin-bottom: 8px; border: 1px solid var(--border); border-radius: 6px; box-sizing: border-box; font-size: 12px; background: var(--surface); color: var(--text); }
     input:focus { outline: none; border-color: var(--secondary); }
-    
-    .res-table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 11px; background: white; border-radius: 8px; overflow: hidden; border: 1px solid var(--border); }
+
+    .res-table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 11px; background: var(--surface); border-radius: 8px; overflow: hidden; border: 1px solid var(--border); }
     .res-table td { padding: 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
     .res-table td:first-child { white-space: nowrap; padding-right: 14px; width: 1px; }
     .res-table td:nth-child(2) { word-break: break-all; }
     .res-table td:nth-child(2) code { word-break: break-all; }
     .res-table tr:last-child td { border-bottom: none; }
-    .res-table b { color: #475569; }
+    .res-table b { color: var(--text-strong); }
     .status-line { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
     
     .match { color: white; font-weight: bold; background: var(--secondary); padding: 2px 6px; border-radius: 4px; font-size: 9px; }
@@ -63,11 +132,11 @@
     .enc-b64url { background: #fef3c7; color: #92400e; }
     .fmt-warn { background: #fef3c7; color: #92400e; padding: 2px 6px; border-radius: 4px; font-size: 9px; font-weight: 700; cursor: help; }
     .enc-banner { margin-bottom: 8px; padding: 8px 10px; background: #fef3c7; color: #92400e; border-radius: 4px; font-size: 11px; font-weight: 600; }
-    .status-info { font-size: 10px; color: #94a3b8; margin-top: 10px; text-align: center; }
-    
-    code { background: #f1f5f9; padding: 2px 4px; border-radius: 3px; color: var(--primary); }
+    .status-info { font-size: 10px; color: var(--text-faint); margin-top: 10px; text-align: center; }
 
-    .intro { font-size: 12px; color: var(--muted); margin: 0 0 12px; line-height: 1.45; }
+    code { background: var(--code-bg); padding: 2px 4px; border-radius: 3px; color: var(--primary); }
+
+    .intro { font-size: 12px; color: var(--text-muted); margin: 0 0 12px; line-height: 1.45; }
     .intro p { margin: 0 0 4px; }
     .intro details { margin-top: 4px; }
     .intro details summary { cursor: pointer; color: var(--secondary); font-weight: 600; font-size: 11px; user-select: none; outline: none; list-style-position: inside; }
@@ -77,35 +146,35 @@
     .intro details li { margin-bottom: 4px; }
     .intro details code { font-size: 11px; }
 
-    .rec-card { background: #fff; border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin: 0 0 12px; }
+    .rec-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin: 0 0 12px; }
     .rec-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
-    .rec-row input[type="text"] { flex: 1 1 200px; min-width: 0; margin: 0; padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 12px; }
-    .rec-row button { font-size: 11px; padding: 6px 10px; border: 1px solid var(--border); background: #fff; color: var(--text); border-radius: 6px; cursor: pointer; font-weight: 600; }
+    .rec-row input[type="text"] { flex: 1 1 200px; min-width: 0; margin: 0; padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 12px; background: var(--surface); color: var(--text); }
+    .rec-row button { font-size: 11px; padding: 6px 10px; border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 6px; cursor: pointer; font-weight: 600; }
     .rec-row button:hover { border-color: var(--primary); color: var(--primary); }
     .rec-row button.primary { background: var(--primary); color: #fff; border-color: var(--primary); }
     .rec-row button.primary:hover { filter: brightness(1.05); color: #fff; }
-    .rec-row button.danger { color: #991b1b; }
+    .rec-row button.danger { color: var(--danger-text); }
     .rec-row button.icon-btn { padding: 6px 8px; font-size: 14px; line-height: 1; flex: 0 0 auto; }
     .rec-row button.icon-btn:disabled { opacity: 0.4; cursor: not-allowed; }
     .rec-actions { display: flex; gap: 6px; }
-    .rec-status { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); }
-    .rec-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #cbd5e1; }
+    .rec-status { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-muted); }
+    .rec-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--text-fainter); }
     .rec-dot.live { background: #dc2626; box-shadow: 0 0 0 0 rgba(220,38,38,0.5); animation: rec-pulse 1.5s infinite; }
     @keyframes rec-pulse { 0% { box-shadow: 0 0 0 0 rgba(220,38,38,0.5); } 70% { box-shadow: 0 0 0 6px rgba(220,38,38,0); } 100% { box-shadow: 0 0 0 0 rgba(220,38,38,0); } }
-    .rec-error { font-size: 11px; color: #991b1b; margin-top: 6px; }
+    .rec-error { font-size: 11px; color: var(--danger-text); margin-top: 6px; }
 
     .cap-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; margin: 12px 15px 0; }
     .cap-list[hidden] { display: none; }
-    .cap-card { position: relative; background: #fff; border: 1px solid var(--border); border-radius: 8px; padding: 9px 10px; cursor: pointer; transition: border-color 0.1s, background-color 0.1s; }
-    .cap-detail-btn { position: absolute; top: 6px; right: 6px; width: 18px; height: 18px; border-radius: 50%; background: #f1f5f9; color: #64748b; border: 1px solid var(--border); font-size: 11px; font-weight: 700; line-height: 1; cursor: pointer; display: flex; align-items: center; justify-content: center; padding: 0; font-style: italic; font-family: serif; }
+    .cap-card { position: relative; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 9px 10px; cursor: pointer; transition: border-color 0.1s, background-color 0.1s; }
+    .cap-detail-btn { position: absolute; top: 6px; right: 6px; width: 18px; height: 18px; border-radius: 50%; background: var(--surface-alt); color: var(--text-muted); border: 1px solid var(--border); font-size: 11px; font-weight: 700; line-height: 1; cursor: pointer; display: flex; align-items: center; justify-content: center; padding: 0; font-style: italic; font-family: serif; }
     .cap-detail-btn:hover { background: var(--primary); color: white; border-color: var(--primary); }
-    .cap-card:hover { border-color: var(--primary); background: #fef9f4; }
+    .cap-card:hover { border-color: var(--primary); background: var(--surface-hover-primary); }
     .cap-card.no-em { opacity: 0.55; cursor: default; }
-    .cap-card.no-em:hover { background: #fff; border-color: var(--border); }
+    .cap-card.no-em:hover { background: var(--surface); border-color: var(--border); }
     .cap-card.source-ga { border-left: 3px solid #7c3aed; padding-left: 8px; }
-    .cap-card.transport-first-party { background: #fff7ed; }
-    .cap-card.transport-first-party:hover { background: #fef0e0; border-color: var(--primary); }
-    .cap-card-head { display: flex; gap: 6px; align-items: baseline; font-family: 'Fira Code', 'Consolas', monospace; font-size: 10px; color: var(--muted); margin-bottom: 6px; flex-wrap: wrap; }
+    .cap-card.transport-first-party { background: var(--surface-warm); }
+    .cap-card.transport-first-party:hover { background: var(--surface-warm-hover); border-color: var(--primary); }
+    .cap-card-head { display: flex; gap: 6px; align-items: baseline; font-family: 'Fira Code', 'Consolas', monospace; font-size: 10px; color: var(--text-muted); margin-bottom: 6px; flex-wrap: wrap; }
     .cap-time { color: var(--text); }
     .cap-method { font-weight: 700; color: var(--secondary); font-size: 9px; }
     .cap-host { flex: 1 1 100%; word-break: break-all; min-width: 0; line-height: 1.3; }
@@ -120,56 +189,56 @@
     .cap-pill.none { background: #f1f5f9; color: #94a3b8; }
     .cap-pill.consent-denied { background: #fee2e2; color: #991b1b; }
     .cap-pill.consent-unset  { background: #ffedd5; color: #9a3412; }
-    .cap-card-conv { font-family: 'Fira Code', 'Consolas', monospace; font-size: 10px; color: #475569; margin-top: 6px; line-height: 1.5; word-break: break-word; }
-    .cap-card-conv .conv-sep { color: #cbd5e1; margin: 0 4px; }
+    .cap-card-conv { font-family: 'Fira Code', 'Consolas', monospace; font-size: 10px; color: var(--text-strong); margin-top: 6px; line-height: 1.5; word-break: break-word; }
+    .cap-card-conv .conv-sep { color: var(--text-fainter); margin: 0 4px; }
     .cap-card-conv .conv-evt { color: var(--primary); font-weight: 700; text-transform: uppercase; font-size: 9px; letter-spacing: 0.3px; }
     .cap-card-conv .conv-val { color: #065f46; font-weight: 700; }
     .cap-card-conv .conv-new-true  { color: #065f46; font-weight: 700; }
     .cap-card-conv .conv-new-false { color: #92400e; }
-    .cap-card-conv .conv-items { cursor: help; border-bottom: 1px dotted #94a3b8; }
-    .cap-empty { text-align: center; padding: 16px 15px; color: var(--muted); font-size: 11px; font-style: italic; }
+    .cap-card-conv .conv-items { cursor: help; border-bottom: 1px dotted var(--text-faint); }
+    .cap-empty { text-align: center; padding: 16px 15px; color: var(--text-muted); font-size: 11px; font-style: italic; }
 
-    .footer { margin-top: 8px; padding: 10px 15px; border-top: 1px solid var(--border); text-align: center; font-size: 10px; color: #94a3b8; background: #fff; }
+    .footer { margin-top: 8px; padding: 10px 15px; border-top: 1px solid var(--border); text-align: center; font-size: 10px; color: var(--text-faint); background: var(--surface); }
     .footer a { color: var(--secondary); text-decoration: none; font-weight: 600; }
     .footer a:hover { color: var(--primary); text-decoration: underline; }
 
     .modal { position: fixed; inset: 0; z-index: 1000; }
     .modal[hidden] { display: none; }
-    .modal-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,0.4); }
-    .modal-panel { position: absolute; inset: 16px; background: white; border-radius: 12px; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 12px 32px rgba(0,0,0,0.25); }
+    .modal-backdrop { position: absolute; inset: 0; background: var(--modal-backdrop); }
+    .modal-panel { position: absolute; inset: 16px; background: var(--surface); border-radius: 12px; display: flex; flex-direction: column; overflow: hidden; box-shadow: var(--shadow-modal); }
     .modal-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--border); }
     .modal-title { font-weight: 700; font-size: 13px; color: var(--text); }
-    .modal-close { background: transparent; border: none; font-size: 22px; line-height: 1; cursor: pointer; color: #94a3b8; padding: 0 4px; }
+    .modal-close { background: transparent; border: none; font-size: 22px; line-height: 1; cursor: pointer; color: var(--text-faint); padding: 0 4px; }
     .modal-close:hover { color: var(--primary); }
     .modal-body { flex: 1; overflow-y: auto; padding: 12px 16px; }
-    .modal-meta { font-family: 'Fira Code', 'Consolas', monospace; font-size: 10px; color: #64748b; margin-bottom: 12px; word-break: break-all; }
-    .modal-body h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin: 14px 0 6px; }
+    .modal-meta { font-family: 'Fira Code', 'Consolas', monospace; font-size: 10px; color: var(--text-muted); margin-bottom: 12px; word-break: break-all; }
+    .modal-body h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); margin: 14px 0 6px; }
     .modal-trunc { font-size: 11px; color: #92400e; background: #fef3c7; padding: 6px 10px; border-radius: 4px; margin: 0 0 6px; }
     .modal-body details summary { cursor: pointer; }
     .modal-body .res-table { font-size: 11px; }
-    .modal-body .param-key { font-family: 'Fira Code', 'Consolas', monospace; font-size: 9.5px; color: #94a3b8; font-weight: 400; margin-left: 4px; }
+    .modal-body .param-key { font-family: 'Fira Code', 'Consolas', monospace; font-size: 9.5px; color: var(--text-faint); font-weight: 400; margin-left: 4px; }
     .modal-body .conv-items-list { margin: 0; padding-left: 18px; }
     .modal-body .conv-items-list li { margin-bottom: 2px; }
     .modal-body .consent-list { margin: 0; padding: 0; list-style: none; }
     .modal-body .consent-list li { display: flex; gap: 8px; align-items: baseline; padding: 1px 0; }
-    .modal-body .consent-list .cns-purpose { font-family: 'Fira Code', 'Consolas', monospace; color: #475569; min-width: 150px; }
+    .modal-body .consent-list .cns-purpose { font-family: 'Fira Code', 'Consolas', monospace; color: var(--text-strong); min-width: 150px; }
     .modal-body .consent-list .cns-state-granted { color: #065f46; font-weight: 600; }
     .modal-body .consent-list .cns-state-denied  { color: #991b1b; font-weight: 600; }
-    .modal-body .consent-list .cns-state-unset   { color: #94a3b8; }
-    .modal-body .consent-list .cns-state-unknown { color: #1e293b; font-style: italic; }
-    .modal-body .consent-list .cns-prev          { color: #94a3b8; }
-    .modal-body .consent-list .cns-arrow         { color: #cbd5e1; margin: 0 2px; }
+    .modal-body .consent-list .cns-state-unset   { color: var(--text-faint); }
+    .modal-body .consent-list .cns-state-unknown { color: var(--text); font-style: italic; }
+    .modal-body .consent-list .cns-prev          { color: var(--text-faint); }
+    .modal-body .consent-list .cns-arrow         { color: var(--text-fainter); margin: 0 2px; }
     .modal-body .consent-list .cns-manual { font-size: 9px; color: #6366f1; text-transform: uppercase; letter-spacing: 0.3px; margin-left: 4px; }
 
     .rec-perms { margin: 0 0 12px; font-size: 11px; }
-    .rec-perms summary { cursor: pointer; padding: 6px 10px; color: #64748b; font-weight: 600; user-select: none; outline: none; list-style-position: inside; }
+    .rec-perms summary { cursor: pointer; padding: 6px 10px; color: var(--text-muted); font-weight: 600; user-select: none; outline: none; list-style-position: inside; }
     .rec-perms summary:hover { color: var(--primary); }
     .rec-perms[disabled] summary { cursor: default; opacity: 0.5; pointer-events: none; }
     .rec-perms ul { list-style: none; margin: 6px 0 0; padding: 0 10px; }
     .rec-perms li { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-family: 'Fira Code', 'Consolas', monospace; }
     .rec-perms li code { flex: 1; word-break: break-all; background: transparent; padding: 0; color: var(--text); font-size: 11px; }
-    .rec-perms .perm-revoke { background: transparent; border: 1px solid var(--border); color: #991b1b; border-radius: 4px; padding: 2px 8px; cursor: pointer; font-size: 11px; line-height: 1; font-family: inherit; }
-    .rec-perms .perm-revoke:hover { background: #fef2f2; border-color: #dc2626; }
+    .rec-perms .perm-revoke { background: transparent; border: 1px solid var(--border); color: var(--danger-text); border-radius: 4px; padding: 2px 8px; cursor: pointer; font-size: 11px; line-height: 1; font-family: inherit; }
+    .rec-perms .perm-revoke:hover { background: var(--revoke-hover-bg); border-color: var(--revoke-border-strong); }
   </style>
 </head>
 <body>
@@ -255,49 +324,81 @@
 
 <div id="tab-settings" class="content">
   <div class="intro">
-    <p>Configure capture filters, permission behavior, and the toolbar indicator.</p>
+    <p>Configure capture behavior and the panel's appearance.</p>
   </div>
 
-  <div class="settings-list">
-    <label class="settings-item">
-      <input type="checkbox" id="recFilterEm" checked>
-      <div class="settings-text">
-        <div class="settings-label">Show only requests with user data</div>
-        <div class="settings-desc">When enabled, the capture list hides requests that don't carry any identifier — keeps the view focused on what's relevant for validation.</div>
-      </div>
-    </label>
+  <div class="settings-section">
+    <div class="settings-section-title">Capture</div>
+    <div class="settings-list">
+      <label class="settings-item">
+        <input type="checkbox" id="recFilterEm" checked>
+        <div class="settings-text">
+          <div class="settings-label">Show only requests with user data</div>
+          <div class="settings-desc">When enabled, the capture list hides requests that don't carry any identifier — keeps the view focused on what's relevant for validation.</div>
+        </div>
+      </label>
 
-    <label class="settings-item">
-      <input type="checkbox" id="recFilterGa" checked>
-      <div class="settings-text">
-        <div class="settings-label">Show also Google Analytics requests with user data</div>
-        <div class="settings-desc">Standard GA4 endpoints are detected directly. Tag Gateway and server-side GTM are captured as soon as the respective origin is granted via the <strong>Permit</strong> button. User data is recognized either from the <code>em</code>/<code>eme</code> parameter or from <code>ep.user_data.*</code> event parameters (also via JSON body in sGTM requests).</div>
-      </div>
-    </label>
+      <label class="settings-item">
+        <input type="checkbox" id="recFilterGa" checked>
+        <div class="settings-text">
+          <div class="settings-label">Show also Google Analytics requests with user data</div>
+          <div class="settings-desc">Standard GA4 endpoints are detected directly. Tag Gateway and server-side GTM are captured as soon as the respective origin is granted via the <strong>Permit</strong> button. User data is recognized either from the <code>em</code>/<code>eme</code> parameter or from <code>ep.user_data.*</code> event parameters (also via JSON body in sGTM requests).</div>
+        </div>
+      </label>
 
-    <label class="settings-item">
-      <input type="checkbox" id="recIncludeSubs">
-      <div class="settings-text">
-        <div class="settings-label">Include subdomains when permitting</div>
-        <div class="settings-desc">When on, the Permit button requests a wildcard pattern for the base domain (e.g. <code>https://*.example.com/*</code>) instead of just the current host. Useful for shops with multiple subdomains or a first-party sGTM on its own subdomain. Chrome will show a broader permission dialog — review carefully before granting.</div>
-      </div>
-    </label>
+      <label class="settings-item">
+        <input type="checkbox" id="recIncludeSubs">
+        <div class="settings-text">
+          <div class="settings-label">Include subdomains when permitting</div>
+          <div class="settings-desc">When on, the Permit button requests a wildcard pattern for the base domain (e.g. <code>https://*.example.com/*</code>) instead of just the current host. Useful for shops with multiple subdomains or a first-party sGTM on its own subdomain. Chrome will show a broader permission dialog — review carefully before granting.</div>
+        </div>
+      </label>
 
-    <label class="settings-item">
-      <input type="checkbox" id="recAutoStop" checked>
-      <div class="settings-text">
-        <div class="settings-label">Stop recording when side panel closes</div>
-        <div class="settings-desc">Automatically halts capture if you close the side panel. Disable this if you want recording to continue silently in the background.</div>
-      </div>
-    </label>
+      <label class="settings-item">
+        <input type="checkbox" id="recAutoStop" checked>
+        <div class="settings-text">
+          <div class="settings-label">Stop recording when side panel closes</div>
+          <div class="settings-desc">Automatically halts capture if you close the side panel. Disable this if you want recording to continue silently in the background.</div>
+        </div>
+      </label>
 
-    <label class="settings-item">
-      <input type="checkbox" id="recUdIndicator">
-      <div class="settings-text">
-        <div class="settings-label">Show user-data indicator on extension icon</div>
-        <div class="settings-desc">When on, the toolbar icon shows a pill (<code>ud</code> / <code>eme</code> / <code>em</code>) whenever a standard Google endpoint on the current tab receives user data — independent of recording. Only the built-in Google endpoints (<code>googleadservices.com</code>, <code>google.com/ccm|pagead</code>, <code>google-analytics.com /g/collect</code>) are monitored — never your additional permitted first-party origins. Priority: <code>ud</code> (full user_data) &gt; <code>eme</code> (decoded enhanced match) &gt; <code>em</code> (hashed identifier). Resets on every tab navigation (including SPA route changes).</div>
+      <label class="settings-item">
+        <input type="checkbox" id="recUdIndicator">
+        <div class="settings-text">
+          <div class="settings-label">Show user-data indicator on extension icon</div>
+          <div class="settings-desc">When on, the toolbar icon shows a pill (<code>ud</code> / <code>eme</code> / <code>em</code>) whenever a standard Google endpoint on the current tab receives user data — independent of recording. Only the built-in Google endpoints (<code>googleadservices.com</code>, <code>google.com/ccm|pagead</code>, <code>google-analytics.com /g/collect</code>) are monitored — never your additional permitted first-party origins. Priority: <code>ud</code> (full user_data) &gt; <code>eme</code> (decoded enhanced match) &gt; <code>em</code> (hashed identifier). Resets on every tab navigation (including SPA route changes).</div>
+        </div>
+      </label>
+    </div>
+  </div>
+
+  <div class="settings-section">
+    <div class="settings-section-title">Appearance</div>
+    <div class="settings-list">
+      <div class="settings-radio">
+        <div class="settings-text">
+          <div class="settings-label">Theme</div>
+          <div class="settings-desc">Pick the color scheme. <strong>System</strong> follows the OS setting and switches live when you toggle dark mode at the OS level.</div>
+          <div class="settings-options" role="radiogroup" aria-label="Theme">
+            <label><input type="radio" name="theme" value="system" checked><span>System</span></label>
+            <label><input type="radio" name="theme" value="light"><span>Light</span></label>
+            <label><input type="radio" name="theme" value="dark"><span>Dark</span></label>
+          </div>
+        </div>
       </div>
-    </label>
+
+      <div class="settings-radio">
+        <div class="settings-text">
+          <div class="settings-label">Text size</div>
+          <div class="settings-desc">Adjusts the overall scale of the panel. <strong>Normal</strong> matches the default. Higher steps zoom everything proportionally — fonts, spacing, icons.</div>
+          <div class="settings-options" role="radiogroup" aria-label="Text size">
+            <label><input type="radio" name="uiScale" value="normal" checked><span>Normal</span></label>
+            <label><input type="radio" name="uiScale" value="comfortable"><span>Comfortable</span></label>
+            <label><input type="radio" name="uiScale" value="large"><span>Large</span></label>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </div>
 

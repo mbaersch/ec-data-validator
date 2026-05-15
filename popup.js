@@ -1,4 +1,50 @@
 document.addEventListener('DOMContentLoaded', () => {
+    // ---------- Appearance: theme + ui scale ----------
+    const UI_SCALE_MAP = { normal: 1, comfortable: 1.18, large: 1.4 };
+    const themeMedia = window.matchMedia('(prefers-color-scheme: dark)');
+    let currentThemePref = 'system';
+
+    function applyTheme(pref) {
+        const root = document.documentElement;
+        const effective = (pref === 'system') ? (themeMedia.matches ? 'dark' : 'light') : pref;
+        if (effective === 'dark') root.setAttribute('data-theme', 'dark');
+        else root.removeAttribute('data-theme');
+    }
+
+    function applyUiScale(key) {
+        const v = UI_SCALE_MAP[key] || 1;
+        document.documentElement.style.setProperty('--ui-scale', String(v));
+    }
+
+    themeMedia.addEventListener('change', () => {
+        if (currentThemePref === 'system') applyTheme('system');
+    });
+
+    chrome.storage.local.get(['theme', 'uiScale'], (res) => {
+        currentThemePref = res.theme || 'system';
+        const scale = res.uiScale || 'normal';
+        applyTheme(currentThemePref);
+        applyUiScale(scale);
+        document.querySelectorAll('input[name="theme"]').forEach(r => { r.checked = (r.value === currentThemePref); });
+        document.querySelectorAll('input[name="uiScale"]').forEach(r => { r.checked = (r.value === scale); });
+    });
+
+    document.querySelectorAll('input[name="theme"]').forEach(r => {
+        r.addEventListener('change', () => {
+            if (!r.checked) return;
+            currentThemePref = r.value;
+            applyTheme(currentThemePref);
+            chrome.storage.local.set({ theme: currentThemePref });
+        });
+    });
+    document.querySelectorAll('input[name="uiScale"]').forEach(r => {
+        r.addEventListener('change', () => {
+            if (!r.checked) return;
+            applyUiScale(r.value);
+            chrome.storage.local.set({ uiScale: r.value });
+        });
+    });
+
     const TOKEN_BASE = {
         tv: 'Version',
         em: 'Email Hash',
@@ -527,7 +573,7 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             if (!rows) return;
             const heading = addresses.length > 1
-                ? `<h3 style="font-size:11px;text-transform:uppercase;letter-spacing:0.5px;color:#64748b;margin:14px 0 6px;">Address ${idx + 1}</h3>`
+                ? `<h3 style="font-size:11px;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted);margin:14px 0 6px;">Address ${idx + 1}</h3>`
                 : '';
             html += heading + '<table class="res-table">' + rows + '</table>';
         });
@@ -1280,7 +1326,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return `<li><span class="cns-purpose">${escapeHtml(p.key)}</span><span class="${cls}">${escapeHtml(p.state)}</span></li>`;
         }).join('');
         return `<ul class="consent-list">${list}</ul>`
-             + `<details style="margin-top: 4px;"><summary style="color: #94a3b8; font-size: 10px;">raw</summary><code>${escapeHtml(String(rawValue))}</code></details>`;
+             + `<details style="margin-top: 4px;"><summary style="color: var(--text-faint); font-size: 10px;">raw</summary><code>${escapeHtml(String(rawValue))}</code></details>`;
     }
 
     function renderGcdCell(consent, rawValue) {
@@ -1304,11 +1350,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 stateHtml = `<span class="${finalCls}">${escapeHtml(p.text)}</span>`;
             }
             const manual = p.manual ? '<span class="cns-manual">manual</span>' : '';
-            const letter = p.letter ? ` <span style="color:#94a3b8;font-size:9px;">[${escapeHtml(p.letter)}]</span>` : '';
+            const letter = p.letter ? ` <span style="color:var(--text-faint);font-size:9px;">[${escapeHtml(p.letter)}]</span>` : '';
             return `<li><span class="cns-purpose">${escapeHtml(p.purpose)}</span>${stateHtml}${letter}${manual}</li>`;
         }).join('');
         return `<ul class="consent-list">${list}</ul>`
-             + `<details style="margin-top: 4px;"><summary style="color: #94a3b8; font-size: 10px;">raw</summary><code>${escapeHtml(String(rawValue))}</code></details>`;
+             + `<details style="margin-top: 4px;"><summary style="color: var(--text-faint); font-size: 10px;">raw</summary><code>${escapeHtml(String(rawValue))}</code></details>`;
     }
 
     function renderConversionTable(table, conv, consent, queryParams, bodyParams) {
@@ -1333,7 +1379,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 }).join('');
                 const raw = String(v);
                 cell = `<ol class="conv-items-list">${list}</ol>`
-                     + `<details style="margin-top: 4px;"><summary style="color: #94a3b8; font-size: 10px;">raw</summary><code>${escapeHtml(raw)}</code></details>`;
+                     + `<details style="margin-top: 4px;"><summary style="color: var(--text-faint); font-size: 10px;">raw</summary><code>${escapeHtml(raw)}</code></details>`;
             } else if (k === 'gcs') {
                 cell = renderGcsCell(consent, v);
             } else if (k === 'gcd') {
