@@ -566,9 +566,32 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         runUpdate();
+        // Re-sync clear-link disabled state — storage load fires after the
+        // initial setup below and does not emit input events for the
+        // programmatic assignment.
+        document.querySelectorAll('.input-clear').forEach(btn => {
+            const target = document.getElementById(btn.dataset.target);
+            if (target) btn.disabled = target.value.length === 0;
+        });
     });
 
     [emInput, objInput].forEach(el => el.addEventListener('input', runUpdate));
+
+    // Clear links next to the textarea labels — disabled when the textarea is
+    // already empty so the affordance disappears when there's nothing to clear.
+    document.querySelectorAll('.input-clear').forEach(btn => {
+        const target = document.getElementById(btn.dataset.target);
+        if (!target) return;
+        const sync = () => { btn.disabled = target.value.length === 0; };
+        sync();
+        target.addEventListener('input', sync);
+        btn.addEventListener('click', () => {
+            if (target.value === '') return;
+            target.value = '';
+            target.dispatchEvent(new Event('input', { bubbles: true }));
+            target.focus();
+        });
+    });
 
     // ---------- Capture / Recording ----------
 
@@ -687,6 +710,25 @@ document.addEventListener('DOMContentLoaded', () => {
             : '';
     }
 
+    // Surface anything that isn't `granted` for ad_storage. Falls back to the
+    // gcd[0] state if gcs is absent — gcd carries the same purpose. Granted
+    // requests stay pill-free to keep cards quiet for the normal case.
+    function consentMarkerPill(consent) {
+        if (!consent) return '';
+        let state = consent.adStorage;
+        if (!state && Array.isArray(consent.gcdDecoded) && consent.gcdDecoded[0]) {
+            state = consent.gcdDecoded[0].state;
+        }
+        if (!state || state === 'granted') return '';
+        if (state === 'denied') {
+            return '<span class="cap-pill consent-denied" title="ad_storage denied — request sent without persistent identifiers (Consent Mode)">no ad_storage</span>';
+        }
+        if (state === 'unset') {
+            return '<span class="cap-pill consent-unset" title="ad_storage not set — Consent Mode signal absent">ad_storage unset</span>';
+        }
+        return '';
+    }
+
     function renderPills(em, eme, userData) {
         const pills = [];
 
@@ -754,6 +796,70 @@ document.addEventListener('DOMContentLoaded', () => {
         return '<span class="cap-pill none" title="No em, eme or user_data found in this request">no user data</span>';
     }
 
+    // Render the conversion summary line shown below the identifier pills.
+    // Each segment is conditional — fields that are absent in the request are
+    // dropped silently. Item detail (price/qty/sku) lives in the tooltip; the
+    // card stays compact and the full breakdown is still reachable via the
+    // detail modal.
+    function renderConversionLine(conv) {
+        if (!conv) return '';
+        const segs = [];
+
+        if (conv.eventType) {
+            segs.push(`<span class="conv-evt">${escapeHtml(conv.eventType)}</span>`);
+        }
+
+        if (typeof conv.value === 'number') {
+            const valStr = Number.isInteger(conv.value) ? conv.value.toString() : conv.value.toFixed(2);
+            const cur = conv.currency ? ' ' + escapeHtml(conv.currency) : '';
+            segs.push(`<span class="conv-val">${valStr}${cur}</span>`);
+        }
+
+        if (Array.isArray(conv.items) && conv.items.length > 0) {
+            const tip = conv.items.map(it => {
+                const sku   = it.sku   != null ? it.sku            : '?';
+                const qty   = it.qty   != null ? ' ×' + it.qty : '';
+                const price = it.price != null ? ' @ ' + it.price   : '';
+                return `${sku}${qty}${price}`;
+            }).join(', ');
+            segs.push(`<span class="conv-items" title="${escapeHtml(tip)}">${conv.items.length} items</span>`);
+        } else if (typeof conv.itemCount === 'number' && conv.itemCount > 0) {
+            segs.push(`<span>${conv.itemCount} items</span>`);
+        }
+
+        if (typeof conv.newCustomer === 'boolean') {
+            const cls = conv.newCustomer ? 'conv-new-true' : 'conv-new-false';
+            segs.push(`<span class="${cls}">new: ${conv.newCustomer ? 'yes' : 'no'}</span>`);
+        }
+
+        if (typeof conv.ltv === 'number') {
+            segs.push(`<span title="Customer lifetime value">CLV ${conv.ltv.toFixed(2)}</span>`);
+        }
+
+        if (typeof conv.shipCost === 'number' || conv.shipCountry || conv.shipPostalCode || conv.estDeliveryDate) {
+            const display = [];
+            if (typeof conv.shipCost === 'number') {
+                display.push(Number.isInteger(conv.shipCost) ? conv.shipCost.toString() : conv.shipCost.toFixed(2));
+            }
+            if (conv.shipCountry) display.push(escapeHtml(conv.shipCountry));
+            const tipParts = [];
+            if (typeof conv.shipCost === 'number') tipParts.push(`Cost: ${conv.shipCost}`);
+            if (conv.shipPostalCode)               tipParts.push(`Postcode: ${conv.shipPostalCode}`);
+            if (conv.shipCountry)                  tipParts.push(`Country: ${conv.shipCountry}`);
+            if (conv.estDeliveryDate)              tipParts.push(`Est. delivery: ${conv.estDeliveryDate}`);
+            const tip = tipParts.join(' · ');
+            const label = display.length > 0 ? display.join(' → ') : 'shipping';
+            segs.push(`<span class="conv-items" title="${escapeHtml(tip)}">ship ${label}</span>`);
+        }
+
+        if (conv.orderId) {
+            segs.push(`<span title="Order ID">oid ${escapeHtml(conv.orderId)}</span>`);
+        }
+
+        if (segs.length === 0) return '';
+        return `<div class="cap-card-conv">${segs.join('<span class="conv-sep">·</span>')}</div>`;
+    }
+
     function renderCaptures() {
         recCount.textContent = captures.length;
         const visible = captures.filter(c => {
@@ -782,20 +888,25 @@ document.addEventListener('DOMContentLoaded', () => {
             const transport = c.transport || 'google';
             const source = c.source || 'ads';
             return `<div class="cap-card ${hasIdentifier ? '' : 'no-em'} source-${source} transport-${transport}" data-idx="${realIdx}">
-                <button class="cap-detail-btn" data-detail-idx="${realIdx}" aria-label="Show details" title="Show details">i</button>
+                <button class="cap-detail-btn" data-detail-idx="${realIdx}" aria-label="Show details" title="Show details — tip: Ctrl/⌘+click anywhere on the card opens this too">i</button>
                 <div class="cap-card-head">
                     <span class="cap-time">${formatTime(c.ts)}</span>
                     <span class="cap-method">${c.method}</span>
                     <span class="cap-host">${shortenUrl(c.url, c.host)}</span>
                 </div>
-                <div class="cap-card-pills">${renderPills(c.em, c.eme, c.userData)}</div>
+                <div class="cap-card-pills">${renderPills(c.em, c.eme, c.userData)}${consentMarkerPill(c.consent)}</div>
+                ${renderConversionLine(c.conversion)}
             </div>`;
         }).join('');
         capList.querySelectorAll('.cap-card').forEach(card => {
-            card.addEventListener('click', () => {
+            card.addEventListener('click', (e) => {
                 const idx = Number(card.dataset.idx);
                 const cap = captures[idx];
                 if (!cap) return;
+                if (e.ctrlKey || e.metaKey) {
+                    openDetail(cap);
+                    return;
+                }
                 if (cap.em || cap.eme) {
                     emInput.value = cap.em ? cap.em : 'eme=' + cap.eme;
                     activateTab('tab-em');
@@ -1000,6 +1111,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 em: c.em,
                 eme: c.eme || null,
                 userData: c.userData || null,
+                conversion: c.conversion || null,
+                consent: c.consent || null,
                 source: c.source || 'ads',
                 transport: c.transport || 'google'
             }))
@@ -1090,11 +1203,156 @@ document.addEventListener('DOMContentLoaded', () => {
     fillUrlFromActiveTab();
 
     // ---------- Detail Modal (TODO 3) ----------
-    const detModal = document.getElementById('detailModal');
-    const detMeta  = document.getElementById('detMeta');
-    const detTrunc = document.getElementById('detTrunc');
-    const detQuery = document.getElementById('detQuery');
-    const detBody  = document.getElementById('detBody');
+    const detModal       = document.getElementById('detailModal');
+    const detMeta        = document.getElementById('detMeta');
+    const detTrunc       = document.getElementById('detTrunc');
+    const detConvSection = document.getElementById('detConvSection');
+    const detConvHead    = document.getElementById('detConvHead');
+    const detConv        = document.getElementById('detConv');
+    const detQueryHead   = document.getElementById('detQueryHead');
+    const detQuery       = document.getElementById('detQuery');
+    const detBodyHead    = document.getElementById('detBodyHead');
+    const detBody        = document.getElementById('detBody');
+
+    // Conversion-side parameters with friendly labels. Order in CONV_PARAM_ORDER
+    // controls how the rows are rendered in the Conversion data table. Keys not
+    // in this map are treated as "unknown" and stay in the other tables.
+    const CONV_PARAM_LABELS = {
+        em:                  'Enhanced match',
+        eme:                 'Enhanced match (encrypted)',
+        bttype:              'Event type',
+        en:                  'Event name',
+        value:               'Value',
+        'epn.value':         'Value',
+        'ep.value':          'Value',
+        currency_code:       'Currency',
+        'ep.currency':       'Currency',
+        oid:                 'Order ID',
+        'ep.transaction_id': 'Transaction ID',
+        item:                'Items',
+        vdnc:                'New customer',
+        vdltv:               'Customer lifetime value',
+        dscnt:               'Discount',
+        shf:                 'Shipping cost',
+        delc:                'Shipping country',
+        delopc:              'Shipping postcode',
+        oedeld:              'Estimated delivery date',
+        mid:                 'Merchant Center ID',
+        fcntr:               'Feed country',
+        flng:                'Feed language',
+        gcs:                 'Consent state',
+        gcd:                 'Consent decisions'
+    };
+    const CONV_PARAM_ORDER = [
+        'em', 'eme',
+        'bttype', 'en',
+        'value', 'epn.value', 'ep.value',
+        'currency_code', 'ep.currency',
+        'oid', 'ep.transaction_id',
+        'item',
+        'vdnc', 'vdltv', 'dscnt',
+        'shf', 'delc', 'delopc', 'oedeld',
+        'mid', 'fcntr', 'flng',
+        'gcs', 'gcd'
+    ];
+
+    function isKnownConvKey(k) {
+        return Object.prototype.hasOwnProperty.call(CONV_PARAM_LABELS, k) || /^pr\d+$/.test(k);
+    }
+
+    function renderGcsCell(consent, rawValue) {
+        if (!consent) return `<code>${escapeHtml(String(rawValue))}</code>`;
+        const purposes = [];
+        if (consent.adStorage)        purposes.push({ key: 'ad_storage',        state: consent.adStorage });
+        if (consent.analyticsStorage) purposes.push({ key: 'analytics_storage', state: consent.analyticsStorage });
+        if (purposes.length === 0)    return `<code>${escapeHtml(String(rawValue))}</code>`;
+        const list = purposes.map(p => {
+            const cls = `cns-state-${p.state}`;
+            return `<li><span class="cns-purpose">${escapeHtml(p.key)}</span><span class="${cls}">${escapeHtml(p.state)}</span></li>`;
+        }).join('');
+        return `<ul class="consent-list">${list}</ul>`
+             + `<details style="margin-top: 4px;"><summary style="color: #94a3b8; font-size: 10px;">raw</summary><code>${escapeHtml(String(rawValue))}</code></details>`;
+    }
+
+    function renderGcdCell(consent, rawValue) {
+        if (!consent || !Array.isArray(consent.gcdDecoded)) {
+            return `<code>${escapeHtml(String(rawValue))}</code>`;
+        }
+        const list = consent.gcdDecoded.map(p => {
+            // Two-color render for transition codes ("denied → granted",
+            // "granted → denied"): the left side is the now-overruled default,
+            // the right side is what actually counted for this request. Texts
+            // without "→" describe a single state — colour the whole string
+            // according to that final state.
+            const finalCls = p.state ? `cns-state-${p.state}` : 'cns-state-unknown';
+            let stateHtml;
+            const arrowIdx = p.text.indexOf(' → ');
+            if (arrowIdx !== -1) {
+                const prev = p.text.slice(0, arrowIdx);
+                const curr = p.text.slice(arrowIdx + 3);
+                stateHtml = `<span class="cns-prev">${escapeHtml(prev)}</span><span class="cns-arrow">→</span><span class="${finalCls}">${escapeHtml(curr)}</span>`;
+            } else {
+                stateHtml = `<span class="${finalCls}">${escapeHtml(p.text)}</span>`;
+            }
+            const manual = p.manual ? '<span class="cns-manual">manual</span>' : '';
+            const letter = p.letter ? ` <span style="color:#94a3b8;font-size:9px;">[${escapeHtml(p.letter)}]</span>` : '';
+            return `<li><span class="cns-purpose">${escapeHtml(p.purpose)}</span>${stateHtml}${letter}${manual}</li>`;
+        }).join('');
+        return `<ul class="consent-list">${list}</ul>`
+             + `<details style="margin-top: 4px;"><summary style="color: #94a3b8; font-size: 10px;">raw</summary><code>${escapeHtml(String(rawValue))}</code></details>`;
+    }
+
+    function renderConversionTable(table, conv, consent, queryParams, bodyParams) {
+        if (!conv && !consent) { table.innerHTML = ''; return false; }
+        const all = Object.assign({}, queryParams || {}, bodyParams || {});
+        const rows = [];
+
+        for (const k of CONV_PARAM_ORDER) {
+            if (!Object.prototype.hasOwnProperty.call(all, k)) continue;
+            const v = all[k];
+            const label = CONV_PARAM_LABELS[k] || k;
+            const head  = `<b>${escapeHtml(label)}</b><span class="param-key">(${escapeHtml(k)})</span>`;
+
+            let cell;
+            if (k === 'item' && conv && Array.isArray(conv.items) && conv.items.length > 0) {
+                const cur = conv.currency ? ' ' + escapeHtml(conv.currency) : '';
+                const list = conv.items.map(it => {
+                    const sku   = it.sku   != null ? escapeHtml(it.sku) : '?';
+                    const qty   = it.qty   != null ? ` × ${escapeHtml(String(it.qty))}` : '';
+                    const price = it.price != null ? ` @ ${escapeHtml(String(it.price))}${cur}` : '';
+                    return `<li>${sku}${qty}${price}</li>`;
+                }).join('');
+                const raw = String(v);
+                cell = `<ol class="conv-items-list">${list}</ol>`
+                     + `<details style="margin-top: 4px;"><summary style="color: #94a3b8; font-size: 10px;">raw</summary><code>${escapeHtml(raw)}</code></details>`;
+            } else if (k === 'gcs') {
+                cell = renderGcsCell(consent, v);
+            } else if (k === 'gcd') {
+                cell = renderGcdCell(consent, v);
+            } else {
+                const text = String(v);
+                cell = text.length > 80
+                    ? `<details><summary><code>${escapeHtml(text.slice(0,80))}…</code></summary><code>${escapeHtml(text)}</code></details>`
+                    : `<code>${escapeHtml(text)}</code>`;
+            }
+            rows.push(`<tr><td>${head}</td><td>${cell}</td></tr>`);
+        }
+
+        // GA4 items: pr1, pr2, … kept as raw strings — their encoding is opaque.
+        const prKeys = Object.keys(all).filter(k => /^pr\d+$/.test(k)).sort();
+        for (const k of prKeys) {
+            const v = String(all[k]);
+            const head = `<b>Item ${escapeHtml(k.substring(2))}</b><span class="param-key">(${escapeHtml(k)})</span>`;
+            const cell = v.length > 80
+                ? `<details><summary><code>${escapeHtml(v.slice(0,80))}…</code></summary><code>${escapeHtml(v)}</code></details>`
+                : `<code>${escapeHtml(v)}</code>`;
+            rows.push(`<tr><td>${head}</td><td>${cell}</td></tr>`);
+        }
+
+        if (rows.length === 0) { table.innerHTML = ''; return false; }
+        table.innerHTML = rows.join('');
+        return true;
+    }
 
     function escClose(e) { if (e.key === 'Escape') closeDetail(); }
 
@@ -1106,8 +1364,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
       detMeta.innerHTML = `${formatTime(cap.ts)} · ${escapeHtml(cap.method)} · <code>${escapeHtml(cap.url)}</code>`;
       detTrunc.hidden = !cap.truncated;
-      renderParamTable(detQuery, cap.queryParams || {}, ['em']);
-      renderParamTable(detBody,  cap.bodyParams === undefined ? null : cap.bodyParams, []);
+
+      const hasConv = renderConversionTable(detConv, cap.conversion, cap.consent, cap.queryParams, cap.bodyParams);
+      detConvSection.hidden = !hasConv;
+      detConvHead.textContent  = cap.conversion ? 'Conversion data' : 'Consent state';
+      detQueryHead.textContent = hasConv ? 'Other query parameters' : 'Query Parameters';
+      detBodyHead.textContent  = hasConv ? 'Other body parameters'  : 'Body Parameters';
+
+      const excludeFn = hasConv ? isKnownConvKey : null;
+      renderParamTable(detQuery, cap.queryParams || {}, ['em'], excludeFn);
+      renderParamTable(detBody,  cap.bodyParams === undefined ? null : cap.bodyParams, [], excludeFn);
     }
 
     function closeDetail() {
@@ -1116,7 +1382,7 @@ document.addEventListener('DOMContentLoaded', () => {
       document.removeEventListener('keydown', escClose);
     }
 
-    function renderParamTable(table, params, prioKeys) {
+    function renderParamTable(table, params, prioKeys, excludeFn) {
       if (params === null) {
         table.innerHTML = '<tr><td><em>No request body</em></td></tr>';
         return;
@@ -1125,7 +1391,8 @@ document.addEventListener('DOMContentLoaded', () => {
         table.innerHTML = `<tr><td><em>Truncated (${params.__sizeBytes__} bytes original)</em></td></tr>`;
         return;
       }
-      const keys = Object.keys(params);
+      const allKeys = Object.keys(params);
+      const keys = excludeFn ? allKeys.filter(k => !excludeFn(k)) : allKeys;
       if (keys.length === 0) {
         table.innerHTML = '<tr><td><em>(empty)</em></td></tr>';
         return;

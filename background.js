@@ -241,6 +241,181 @@ function enforceCap(capture) {
   capture.truncated = true;
 }
 
+// Conversion-side parameters worth surfacing on the capture card. Sourced from
+// live Ads conversion requests (/pagead/conversion/, /ccm/conversion/) — the
+// param vocabulary is Ads-specific (vdnc, vdltv, delopc, …), not gtag's public
+// API. Mirrored in queryParams and bodyParams so sGTM / Tag Gateway requests
+// (which carry the same payload in JSON / form-encoded body) yield the same
+// fields. GA4 /g/collect uses its own keys (epn.value, ep.currency) and is
+// handled below.
+const ADS_ITEM_RE = /\(([^)]*)\)/g;
+
+function parseAdsItems(raw) {
+  if (typeof raw !== 'string' || !raw) return null;
+  const items = [];
+  let m;
+  ADS_ITEM_RE.lastIndex = 0;
+  while ((m = ADS_ITEM_RE.exec(raw)) !== null) {
+    const parts = m[1].split('*');
+    const priceStr = parts[0];
+    const qtyStr   = parts[1];
+    const sku      = parts[2];
+    const item = {};
+    if (priceStr !== undefined && priceStr !== '') {
+      const n = Number(priceStr);
+      if (!Number.isNaN(n)) item.price = n;
+    }
+    if (qtyStr !== undefined && qtyStr !== '') {
+      const n = Number(qtyStr);
+      if (!Number.isNaN(n)) item.qty = n;
+    }
+    if (sku !== undefined && sku !== '') item.sku = sku;
+    if (Object.keys(item).length > 0) items.push(item);
+  }
+  return items.length > 0 ? items : null;
+}
+
+function numOrNull(v) {
+  if (v === undefined || v === null || v === '') return null;
+  const n = Number(v);
+  return Number.isNaN(n) ? null : n;
+}
+
+function boolOrNull(v) {
+  if (v === undefined || v === null) return null;
+  const s = String(v).toLowerCase();
+  if (s === 'true')  return true;
+  if (s === 'false') return false;
+  return null;
+}
+
+// Google Consent Signal — encodes per-purpose consent state. Shape "G1AB[CD]":
+//   position 2 = ad_storage, position 3 = analytics_storage
+//   '0' denied, '1' granted, '-' unset. Higher positions (ad_user_data,
+//   ad_personalization) exist on newer payloads but are not surfaced here —
+//   the user only asked for the ad_storage signal, which is enough to explain
+//   the 99% case of "request went out without identifiers". The full raw value
+//   is preserved so the detail modal can show it verbatim.
+function parseGcs(raw) {
+  if (typeof raw !== 'string') return null;
+  const s = raw.trim();
+  if (!/^G1[01-][01-]/.test(s)) return null;
+  const map = { '0': 'denied', '1': 'granted', '-': 'unset' };
+  return {
+    adStorage:        map[s[2]] || null,
+    analyticsStorage: map[s[3]] || null,
+    raw: s
+  };
+}
+
+// gcd carries per-purpose consent state (default, update, manual overrides) for
+// up to four purposes: ad_storage, analytics_storage, ad_user_data,
+// ad_personalization. The letter codes below mirror the user's GCD bookmarklet
+// — lowercase = automatic, uppercase = manually set via the Consent Mode API.
+// `updated` tracks whether the purpose received a Consent Mode update beyond
+// the initial default. Renderers use this to suppress the green/red status
+// color when an update happened — the prior state (default) is no longer
+// meaningful in that case, so neutral text is more honest than colouring
+// either side of the transition.
+const GCD_LETTER_MAP = {
+  l: { text: 'not set',                    state: 'unset',   updated: false, manual: false },
+  p: { text: 'denied (default)',           state: 'denied',  updated: false, manual: false },
+  q: { text: 'denied (default + update)',  state: 'denied',  updated: true,  manual: false },
+  t: { text: 'granted (default)',          state: 'granted', updated: false, manual: false },
+  r: { text: 'denied → granted',           state: 'granted', updated: true,  manual: false },
+  m: { text: 'denied (update)',            state: 'denied',  updated: true,  manual: false },
+  n: { text: 'granted (update)',           state: 'granted', updated: true,  manual: false },
+  u: { text: 'granted → denied',           state: 'denied',  updated: true,  manual: false },
+  v: { text: 'granted (default + update)', state: 'granted', updated: true,  manual: false },
+  L: { text: 'not set',                    state: 'unset',   updated: false, manual: true  },
+  P: { text: 'granted (default + update)', state: 'granted', updated: true,  manual: true  },
+  Q: { text: 'denied + update',            state: 'denied',  updated: true,  manual: true  },
+  T: { text: 'granted',                    state: 'granted', updated: false, manual: true  },
+  R: { text: 'denied → granted',           state: 'granted', updated: true,  manual: true  },
+  M: { text: 'denied (update)',            state: 'denied',  updated: true,  manual: true  },
+  N: { text: 'granted (update)',           state: 'granted', updated: true,  manual: true  },
+  U: { text: 'granted → denied',           state: 'denied',  updated: true,  manual: true  },
+  V: { text: 'granted (default + update)', state: 'granted', updated: true,  manual: true  }
+};
+const GCD_PURPOSES = ['ad_storage', 'analytics_storage', 'ad_user_data', 'ad_personalization'];
+
+function parseGcd(raw) {
+  if (typeof raw !== 'string') return null;
+  const s = raw.trim();
+  if (!/^1[13]/.test(s)) return null;
+  const letters = [];
+  const re = /[a-zA-Z]/g;
+  let m;
+  while ((m = re.exec(s)) !== null) letters.push(m[0]);
+  if (letters.length === 0) return null;
+  return GCD_PURPOSES.map((purpose, i) => {
+    const letter = letters[i] || null;
+    const info = letter ? GCD_LETTER_MAP[letter] : null;
+    return {
+      purpose,
+      letter,
+      text:    info ? info.text    : (letter ? 'unknown' : 'absent'),
+      state:   info ? info.state   : null,
+      updated: info ? info.updated : false,
+      manual:  info ? info.manual  : false
+    };
+  });
+}
+
+function extractConversionData(queryParams, bodyParams, pathname) {
+  const all = Object.assign({}, queryParams || {}, bodyParams || {});
+  const isAds = /\/(pagead|ccm)\/conversion\//.test(pathname);
+  const isGa  = (pathname || '').includes('/g/collect');
+  if (!isAds && !isGa) return null;
+
+  const out = {};
+
+  if (isAds) {
+    const value = numOrNull(all.value);
+    if (value !== null) out.value = value;
+    if (all.currency_code) out.currency = String(all.currency_code);
+    if (all.bttype)        out.eventType = String(all.bttype);
+    if (all.oid)           out.orderId   = String(all.oid);
+
+    const items = parseAdsItems(all.item);
+    if (items) out.items = items;
+
+    const newCust = boolOrNull(all.vdnc);
+    if (newCust !== null) out.newCustomer = newCust;
+
+    const ltv = numOrNull(all.vdltv);
+    if (ltv !== null) out.ltv = ltv;
+
+    const discount = numOrNull(all.dscnt);
+    if (discount !== null) out.discount = discount;
+
+    if (all.mid)   out.merchantId    = String(all.mid);
+    if (all.fcntr) out.feedCountry   = String(all.fcntr);
+    if (all.flng)  out.feedLanguage  = String(all.flng);
+
+    const shipCost = numOrNull(all.shf);
+    if (shipCost !== null) out.shipCost = shipCost;
+    if (all.delc)   out.shipCountry    = String(all.delc);
+    if (all.delopc) out.shipPostalCode = String(all.delopc);
+    if (all.oedeld) out.estDeliveryDate = String(all.oedeld);
+  }
+
+  if (isGa) {
+    const value = numOrNull(all['epn.value']) ?? numOrNull(all['ep.value']);
+    if (value !== null) out.value = value;
+    if (all['ep.currency']) out.currency = String(all['ep.currency']);
+    if (all.en) out.eventType = String(all.en);
+    if (all['ep.transaction_id']) out.orderId = String(all['ep.transaction_id']);
+    let itemCount = 0;
+    for (const k of Object.keys(all)) {
+      if (/^pr\d+$/.test(k)) itemCount++;
+    }
+    if (itemCount > 0) out.itemCount = itemCount;
+  }
+
+  return Object.keys(out).length > 0 ? out : null;
+}
+
 function isGoogleHost(host) {
   const h = (host || '').toLowerCase();
   return h.endsWith('googleadservices.com')
@@ -333,6 +508,19 @@ function handleRequest(details) {
 
   const { em, eme, queryParams, bodyParams } = extractAllParams(details.url, details.requestBody);
   const userData = extractUserData(details.url, details.requestBody);
+  const conversion = extractConversionData(queryParams, bodyParams, pathname);
+
+  const gcsRaw = (queryParams && queryParams.gcs) || (bodyParams && bodyParams.gcs) || null;
+  const gcdRaw = (queryParams && queryParams.gcd) || (bodyParams && bodyParams.gcd) || null;
+  const gcsParsed = parseGcs(gcsRaw);
+  const gcdParsed = parseGcd(gcdRaw);
+  const consent = (gcsParsed || gcdParsed || gcsRaw || gcdRaw) ? {
+    adStorage:        gcsParsed ? gcsParsed.adStorage : null,
+    analyticsStorage: gcsParsed ? gcsParsed.analyticsStorage : null,
+    gcs:              gcsParsed ? gcsParsed.raw : (gcsRaw || null),
+    gcd:              gcdRaw,
+    gcdDecoded:       gcdParsed
+  } : null;
 
   // Indicator runs independently of recording, but only for built-in Google
   // endpoints — first-party transports (Tag Gateway / sGTM) are intentionally
@@ -359,6 +547,8 @@ function handleRequest(details) {
     em,
     eme,
     userData,
+    conversion,
+    consent,
     queryParams,
     bodyParams,
     truncated: false,

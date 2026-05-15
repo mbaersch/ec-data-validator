@@ -19,6 +19,11 @@
     
     .input-group { margin-bottom: 15px; }
     label { display: block; font-size: 10px; color: #64748b; text-transform: uppercase; margin-bottom: 5px; font-weight: 700; letter-spacing: 0.5px; }
+    .input-label-row { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 5px; }
+    .input-label-row label { margin-bottom: 0; }
+    .input-clear { background: none; border: none; padding: 0; font: inherit; font-size: 10px; color: #94a3b8; cursor: pointer; text-transform: none; letter-spacing: 0; font-weight: 400; }
+    .input-clear:hover:not(:disabled) { color: var(--primary); text-decoration: underline; }
+    .input-clear:disabled { opacity: 0.4; cursor: default; }
     textarea { width: 100%; height: 130px; box-sizing: border-box; border: 1px solid var(--border); border-radius: 6px; padding: 10px; font-family: 'Fira Code', 'Consolas', monospace; font-size: 11px; resize: none; background: #fff; transition: border-color 0.2s; }
     textarea:focus { outline: none; border-color: var(--primary); }
     
@@ -104,6 +109,15 @@
     .cap-pill.identifier-eme   { background: #fef3c7; color: #92400e; }
     .cap-pill.source-userdata  { background: #e2e8f0; color: #475569; }
     .cap-pill.none { background: #f1f5f9; color: #94a3b8; }
+    .cap-pill.consent-denied { background: #fee2e2; color: #991b1b; }
+    .cap-pill.consent-unset  { background: #ffedd5; color: #9a3412; }
+    .cap-card-conv { font-family: 'Fira Code', 'Consolas', monospace; font-size: 10px; color: #475569; margin-top: 6px; line-height: 1.5; word-break: break-word; }
+    .cap-card-conv .conv-sep { color: #cbd5e1; margin: 0 4px; }
+    .cap-card-conv .conv-evt { color: var(--primary); font-weight: 700; text-transform: uppercase; font-size: 9px; letter-spacing: 0.3px; }
+    .cap-card-conv .conv-val { color: #065f46; font-weight: 700; }
+    .cap-card-conv .conv-new-true  { color: #065f46; font-weight: 700; }
+    .cap-card-conv .conv-new-false { color: #92400e; }
+    .cap-card-conv .conv-items { cursor: help; border-bottom: 1px dotted #94a3b8; }
     .cap-empty { text-align: center; padding: 16px 15px; color: var(--muted); font-size: 11px; font-style: italic; }
 
     .footer { margin-top: 8px; padding: 10px 15px; border-top: 1px solid var(--border); text-align: center; font-size: 10px; color: #94a3b8; background: #fff; }
@@ -124,6 +138,19 @@
     .modal-trunc { font-size: 11px; color: #92400e; background: #fef3c7; padding: 6px 10px; border-radius: 4px; margin: 0 0 6px; }
     .modal-body details summary { cursor: pointer; }
     .modal-body .res-table { font-size: 11px; }
+    .modal-body .param-key { font-family: 'Fira Code', 'Consolas', monospace; font-size: 9.5px; color: #94a3b8; font-weight: 400; margin-left: 4px; }
+    .modal-body .conv-items-list { margin: 0; padding-left: 18px; }
+    .modal-body .conv-items-list li { margin-bottom: 2px; }
+    .modal-body .consent-list { margin: 0; padding: 0; list-style: none; }
+    .modal-body .consent-list li { display: flex; gap: 8px; align-items: baseline; padding: 1px 0; }
+    .modal-body .consent-list .cns-purpose { font-family: 'Fira Code', 'Consolas', monospace; color: #475569; min-width: 150px; }
+    .modal-body .consent-list .cns-state-granted { color: #065f46; font-weight: 600; }
+    .modal-body .consent-list .cns-state-denied  { color: #991b1b; font-weight: 600; }
+    .modal-body .consent-list .cns-state-unset   { color: #94a3b8; }
+    .modal-body .consent-list .cns-state-unknown { color: #1e293b; font-style: italic; }
+    .modal-body .consent-list .cns-prev          { color: #94a3b8; }
+    .modal-body .consent-list .cns-arrow         { color: #cbd5e1; margin: 0 2px; }
+    .modal-body .consent-list .cns-manual { font-size: 9px; color: #6366f1; text-transform: uppercase; letter-spacing: 0.3px; margin-left: 4px; }
 
     .rec-perms { margin: 0 0 12px; font-size: 11px; }
     .rec-perms summary { cursor: pointer; padding: 6px 10px; color: #64748b; font-weight: 600; user-select: none; outline: none; list-style-position: inside; }
@@ -213,7 +240,10 @@
   </details>
 
   <div class="input-group">
-    <label>Google Ads "em" Parameter</label>
+    <div class="input-label-row">
+      <label for="emInput">"em" Parameter Value</label>
+      <button type="button" class="input-clear" data-target="emInput">clear</button>
+    </div>
     <textarea id="emInput" placeholder="tv.1~em.hash~pn.hash..."></textarea>
   </div>
   <div id="emResult"></div>
@@ -236,7 +266,10 @@
     </details>
   </div>
   <div class="input-group">
-    <label>JSON / JS Literal Payload</label>
+    <div class="input-label-row">
+      <label for="objInput">JSON / JS Literal Payload</label>
+      <button type="button" class="input-clear" data-target="objInput">clear</button>
+    </div>
     <textarea id="objInput" placeholder="{ user_data: { sha256_email_address: '...' } }"></textarea>
   </div>
   <div id="objResult"></div>
@@ -264,9 +297,13 @@
     <div class="modal-body">
       <div class="modal-meta" id="detMeta"></div>
       <p class="modal-trunc" id="detTrunc" hidden>Capture wurde gekuerzt (8 KB Cap).</p>
-      <h3>Query Parameters</h3>
+      <section id="detConvSection" hidden>
+        <h3 id="detConvHead">Conversion data</h3>
+        <table class="res-table" id="detConv"></table>
+      </section>
+      <h3 id="detQueryHead">Query Parameters</h3>
       <table class="res-table" id="detQuery"></table>
-      <h3>Body Parameters</h3>
+      <h3 id="detBodyHead">Body Parameters</h3>
       <table class="res-table" id="detBody"></table>
     </div>
   </div>
