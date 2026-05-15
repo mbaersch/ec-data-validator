@@ -4,6 +4,8 @@ A Chrome extension for inspecting and validating **Enhanced Conversions** data s
 
 Use it to verify that ec tracking is working and the data leaving the browser actually matches what you think they're sending.
 
+**Install from the Chrome Web Store:** <https://chromewebstore.google.com/detail/enhanced-conversion-data/oofghodijgflljjckgomndgkobnahhcp>
+
 ## What it does
 
 **Decode the `em` parameter** from a Google Ads conversion request:
@@ -44,6 +46,7 @@ Use it to verify that ec tracking is working and the data leaving the browser ac
 - The URL field auto-fills from the active tab and updates on tab switch, unless you have focus inside it (so manual edits aren't overwritten)
 - Optional **Stop recording when side panel closes** (default on): closing the side panel ends the recording; uncheck if you want capturing to continue in the background
 - Optional **Include subdomains when permitting** (default off): broadens the Permit request to a wildcard for the base domain (e.g. `https://*.example.com/*` instead of `https://shop.example.com/*`). Useful for shops with multiple subdomains or a first-party sGTM on its own subdomain. Chrome shows a wider permission dialog when this is active — review carefully before granting
+- Optional **User-data indicator on extension icon** (default off): when active, the toolbar icon shows a pill (`ud` / `eme` / `em`) on the current tab whenever a built-in Google endpoint receives user data — independent of recording, so you see at a glance whether ec data is flowing on a page. Scoped strictly to the static Google endpoints (no monitoring of first-party / sGTM origins, even when granted). Pill resets on every tab navigation (including SPA route changes)
 
 <img width="664" height="414" alt="image" src="https://github.com/user-attachments/assets/0f804a14-317b-4ced-821f-b71f971c3bbf" />
 
@@ -121,6 +124,10 @@ lightTest()          // 30s diagnostic listener that logs every match
 ```
 
 ## Changelog
+
+### v2.5
+
+- **User-data indicator on extension icon**: new opt-in option in the recording card. When active, the toolbar badge shows `ud` / `eme` / `em` on the current tab whenever a built-in Google endpoint (Ads `/ccm`, `/pagead`, GA4 `/g/collect`) receives user data — independent of recording, so the icon can act as an ambient "is ec data flowing here?" indicator while you browse. Resets automatically on every tab navigation, including SPA `pushState` / `replaceState`. Strictly scoped to the static Google endpoints — first-party / sGTM / Tag Gateway origins are not monitored by the indicator, even when granted for recording. You will see those requests only in recording mode.
 
 ### v2.4
 

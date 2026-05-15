@@ -24,7 +24,7 @@ function buildListenerPatterns(grantedOrigins) {
   return [...STATIC_PATTERNS, ...custom];
 }
 
-let state = { recording: false, captures: [] };
+let state = { recording: false, captures: [], userDataIndicator: false };
 
 function persist() {
   chrome.storage.local.set({ captureState: state });
@@ -35,6 +35,7 @@ const bootstrapPromise = new Promise(resolve => {
     if (res.captureState) {
       state.captures = Array.isArray(res.captureState.captures) ? res.captureState.captures : [];
       state.recording = !!res.captureState.recording;
+      state.userDataIndicator = !!res.captureState.userDataIndicator;
     }
     resolve();
   });
@@ -280,8 +281,45 @@ function broadcast(msg) {
   chrome.runtime.sendMessage(msg).catch(() => { /* no listeners — ignore */ });
 }
 
+// Toolbar-Indicator: which marker is "stronger" — `ud` (full user_data object)
+// wins over `eme` (decoded enhanced match) wins over `em` (hashed only).
+// Badge upgrades only — a weaker marker arriving later never downgrades the
+// current pill, so the displayed value reflects the strongest signal seen on
+// the tab since the last navigation. Colors mirror the capture-card pills
+// (popup.html .identifier-em / .identifier-eme / .source-userdata) so the
+// toolbar uses the same visual vocabulary as the recording UI.
+const BADGE_RANK  = { em: 1, eme: 2, ud: 3 };
+const BADGE_COLOR = { em: '#1e40af', eme: '#92400e', ud: '#475569' };
+
+function badgeMarker(em, eme, userData) {
+  if (userData) return 'ud';
+  if (eme) return 'eme';
+  if (em) return 'em';
+  return null;
+}
+
+function maybeUpgradeBadge(tabId, marker) {
+  chrome.action.getBadgeText({ tabId }, (current) => {
+    const currentRank = BADGE_RANK[current] || 0;
+    const newRank = BADGE_RANK[marker] || 0;
+    if (newRank <= currentRank) return;
+    chrome.action.setBadgeText({ tabId, text: marker });
+    chrome.action.setBadgeBackgroundColor({ tabId, color: BADGE_COLOR[marker] });
+  });
+}
+
+function clearAllBadges() {
+  chrome.tabs.query({}, (tabs) => {
+    for (const t of tabs) {
+      if (typeof t.id === 'number' && t.id >= 0) {
+        chrome.action.setBadgeText({ tabId: t.id, text: '' });
+      }
+    }
+  });
+}
+
 function handleRequest(details) {
-  if (!state.recording) return;
+  if (!state.recording && !state.userDataIndicator) return;
   if (isBlockedInitiator(details.initiator)) return;
 
   let host = '', pathname = '';
@@ -295,6 +333,16 @@ function handleRequest(details) {
 
   const { em, eme, queryParams, bodyParams } = extractAllParams(details.url, details.requestBody);
   const userData = extractUserData(details.url, details.requestBody);
+
+  // Indicator runs independently of recording, but only for built-in Google
+  // endpoints — first-party transports (Tag Gateway / sGTM) are intentionally
+  // excluded so the always-on path never touches user-granted origins.
+  if (state.userDataIndicator && transport === 'google' && typeof details.tabId === 'number' && details.tabId >= 0) {
+    const marker = badgeMarker(em, eme, userData);
+    if (marker) maybeUpgradeBadge(details.tabId, marker);
+  }
+
+  if (!state.recording) return;
 
   if (transport === 'first-party') {
     const hasPathMarker = /\/(ccm|pagead|g\/collect)(\/|$)/.test(pathname);
@@ -351,6 +399,14 @@ chrome.runtime.onStartup.addListener(refreshListener);
 
 refreshListener();
 
+// SPA-aware reset: chrome.tabs.onUpdated fires with changeInfo.url for both
+// full navigations and history.pushState/replaceState, so a single listener
+// covers classic and SPA flows without needing the webNavigation permission.
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (changeInfo.url === undefined) return;
+  chrome.action.setBadgeText({ tabId, text: '' });
+});
+
 // Side-panel lifecycle: each opened panel connects via a long-lived port.
 // When the port disconnects (panel closed) and the panel has the auto-stop
 // option enabled, we stop recording. The option is communicated through the
@@ -395,6 +451,12 @@ chrome.runtime.onMessage.addListener((msg, sender, respond) => {
       state.captures = [];
       persist();
       broadcast({ type: 'capturesCleared' });
+      respond({ ok: true });
+    } else if (msg.type === 'setIndicator') {
+      const enabled = !!msg.enabled;
+      state.userDataIndicator = enabled;
+      persist();
+      if (!enabled) clearAllBadges();
       respond({ ok: true });
     }
   });

@@ -197,6 +197,13 @@
         Stop recording when side panel closes
       </label>
     </div>
+    <div class="rec-row" style="margin-top:6px;">
+      <label class="rec-filter">
+        <input type="checkbox" id="recUdIndicator">
+        Show user-data indicator on extension icon
+        <span class="rec-filter-info" title="When on, the toolbar icon shows a pill (ud / eme / em) whenever a standard Google endpoint on the current tab receives user data — independent of recording. Only the built-in Google endpoints (googleadservices.com, google.com/ccm|pagead, google-analytics.com /g/collect) are monitored — never your additional permitted first-party origins. Priority: ud (full user_data) > eme (decoded enhanced match) > em (hashed identifier). Resets on every tab navigation (including SPA route changes).">i</span>
+      </label>
+    </div>
     <div id="recError" class="rec-error" hidden></div>
   </div>
 

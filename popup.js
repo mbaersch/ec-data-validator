@@ -583,6 +583,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const recError      = document.getElementById('recError');
     const recAutoStop   = document.getElementById('recAutoStop');
     const recIncludeSubs = document.getElementById('recIncludeSubs');
+    const recUdIndicator = document.getElementById('recUdIndicator');
     const capList       = document.getElementById('capList');
     const capEmpty      = document.getElementById('capEmpty');
 
@@ -1031,17 +1032,20 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // Initial state pull from background + filter persistence
-    chrome.storage.local.get(['recFilterEm', 'recFilterGa', 'recAutoStop', 'recIncludeSubs'], (res) => {
+    chrome.storage.local.get(['recFilterEm', 'recFilterGa', 'recAutoStop', 'recIncludeSubs', 'recUdIndicator'], (res) => {
         // Default to true if never set
         filterEmOnly = (res.recFilterEm === undefined) ? true : !!res.recFilterEm;
         filterIncludeGa = (res.recFilterGa === undefined) ? true : !!res.recFilterGa;
         const autoStop = (res.recAutoStop === undefined) ? true : !!res.recAutoStop;
         includeSubdomains = !!res.recIncludeSubs;
+        const udIndicator = !!res.recUdIndicator;
         recFilterEm.checked = filterEmOnly;
         recFilterGa.checked = filterIncludeGa;
         recAutoStop.checked = autoStop;
         recIncludeSubs.checked = includeSubdomains;
+        recUdIndicator.checked = udIndicator;
         sendAutoStopOption(autoStop);
+        chrome.runtime.sendMessage({ type: 'setIndicator', enabled: udIndicator });
         refreshPermitButton();
         renderCaptures();
     });
@@ -1066,6 +1070,12 @@ document.addEventListener('DOMContentLoaded', () => {
         includeSubdomains = recIncludeSubs.checked;
         chrome.storage.local.set({ recIncludeSubs: includeSubdomains });
         refreshPermitButton();
+    });
+
+    recUdIndicator.addEventListener('change', () => {
+        const v = recUdIndicator.checked;
+        chrome.storage.local.set({ recUdIndicator: v });
+        chrome.runtime.sendMessage({ type: 'setIndicator', enabled: v });
     });
 
     chrome.runtime.sendMessage({ type: 'getState' }, (res) => {
