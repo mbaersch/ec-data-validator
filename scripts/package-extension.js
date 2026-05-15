@@ -19,6 +19,7 @@ const filesToInclude = [
   'background.js',
   'popup.html',
   'popup.js',
+  'theme-prehydrate.js',
   'icon-16.png',
   'icon-32.png',
   'icon-48.png',
