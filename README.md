@@ -131,6 +131,11 @@ lightTest()          // 30s diagnostic listener that logs every match
 
 ## Changelog
 
+### v2.5.2
+
+- **Fix: postal code / region recognition.** The compliance check and identifier pills only looked for `zp0`/`st0`, but the live Google tag emits `pc0`/`rg0` (postal code / region) for non-US addresses. Result was a false "Postal Code missing" warning and missing pills on capture cards. The decoder label table already knew both since v2.4; this aligns the rest of the codebase. `zp0`/`st0` are dropped — they were never observed in real captures.
+- **Fix: street verification never matched.** Plaintext entered in the *Street* verify field was hashed as-is, but Google strips digits and punctuation from `address.street` before hashing (and does *not* collapse the resulting whitespace). `"Strasse 1a"` hashes as `"strasse a"`, `"Bahnhofsr. 42B"` as `"bahnhofsr b"`, `"Bahnhofstraße 22A - C"` as `"bahnhofstraße a  c"` (double space where `" - "` was). The verifier applies the same normalization now, verified against eight live-tag hashes.
+
 ### v2.5
 
 - **Settings tab** (⚙ icon, top right): the five capture / permit / indicator toggles moved out of the recording card into their own tab — each with a full inline description rather than a hover tooltip. Keeps the EM Decoder tab focused on the actual recording controls.

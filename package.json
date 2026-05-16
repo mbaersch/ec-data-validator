@@ -1,6 +1,6 @@
 {
   "name": "ec-data-validator",
-  "version": "2.5.1",
+  "version": "2.5.2",
   "description": "Build, screenshot and test tooling for the Enhanced Conversion Data Validator browser extension.",
   "private": true,
   "scripts": {
