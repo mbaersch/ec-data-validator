@@ -53,8 +53,6 @@ document.addEventListener('DOMContentLoaded', () => {
         ln: 'Last Name Hash',
         sa: 'Street Hash',
         ct: 'City',
-        st: 'State',
-        zp: 'Zip',
         pc: 'Postal Code',
         rg: 'Region',
         co: 'Country'
@@ -100,13 +98,23 @@ document.addEventListener('DOMContentLoaded', () => {
         return cleaned.replace(/\+/g, '');
     }
 
+    // Street: alle Nicht-Buchstaben (ausser Whitespace) verwerfen, dann lower
+    // + trim. Empirisch verifiziert: Google strippt Hausnummern und
+    // Satzzeichen (".", "-") vor dem Hashen, aber ersetzt sie durch nichts und
+    // kollabiert KEINE Mehrfach-Spaces — "Bahnhofstraße 22A - C" landet bei
+    // "bahnhofstraße a  c" (Doppel-Space wo " - " war). Umlaute / ß bleiben
+    // erhalten.
+    function normalizeStreet(v) {
+        return v.toLowerCase().replace(/[^\p{L}\s]/gu, '').trim();
+    }
+
     // Felder, die als Hash auftreten koennen -> Vergleichsfeld dynamisch
     const verifyFields = [
         { id: 'v_email',  label: 'Email',      placeholder: 'test@example.com', hashKeys: ['sha256_email_address', 'em'], normalize: normalizeEmail },
         { id: 'v_phone',  label: 'Phone',      placeholder: '+4912345678',      hashKeys: ['sha256_phone_number', 'pn'], normalize: normalizePhone },
         { id: 'v_fn',     label: 'First Name', placeholder: 'Max',              hashKeys: ['sha256_first_name', 'fn0'] },
         { id: 'v_ln',     label: 'Last Name',  placeholder: 'Mustermann',       hashKeys: ['sha256_last_name', 'ln0'] },
-        { id: 'v_street', label: 'Street',     placeholder: 'Hauptstr. 1',      hashKeys: ['sha256_street', 'sa0'] }
+        { id: 'v_street', label: 'Street',     placeholder: 'Hauptstr. 1',      hashKeys: ['sha256_street', 'sa0'], normalize: normalizeStreet }
     ];
     const hashKeyToVerifyId = {};
     verifyFields.forEach(f => f.hashKeys.forEach(k => { hashKeyToVerifyId[k] = f.id; }));
@@ -323,11 +331,11 @@ document.addEventListener('DOMContentLoaded', () => {
             phone:   has('phone_number', 'sha256_phone_number', 'pn'),
             fn:      hasValid('first_name', 'sha256_first_name', 'fn0'),
             ln:      hasValid('last_name', 'sha256_last_name', 'ln0'),
-            zip:     hasValid('postal_code', 'zp0'),
+            zip:     hasValid('postal_code', 'pc0'),
             country: hasValid('country', 'co0'),
             street:  hasValid('street', 'sa0'),
             city:    hasValid('city', 'ct0'),
-            region:  hasValid('region', 'st0'),
+            region:  hasValid('region', 'rg0'),
             any:     keys.size > 0
         };
         r.addrAny  = r.fn || r.ln || r.zip || r.country || r.street || r.city || r.region;
@@ -672,8 +680,8 @@ document.addEventListener('DOMContentLoaded', () => {
         sa0: 'identifier-addr',
         co0: 'identifier-addr',
         ct0: 'identifier-addr',
-        st0: 'identifier-addr',
-        zp0: 'identifier-addr'
+        rg0: 'identifier-addr',
+        pc0: 'identifier-addr'
     };
     const PILL_LABEL = {
         em:  'Email',
@@ -682,11 +690,11 @@ document.addEventListener('DOMContentLoaded', () => {
         ln0: 'Last Name',
         sa0: 'Street',
         ct0: 'City',
-        st0: 'State',
-        zp0: 'Zip',
+        rg0: 'Region',
+        pc0: 'Postal Code',
         co0: 'Country'
     };
-    const PILL_ORDER = ['em', 'pn', 'fn0', 'ln0', 'sa0', 'ct0', 'st0', 'zp0', 'co0'];
+    const PILL_ORDER = ['em', 'pn', 'fn0', 'ln0', 'sa0', 'ct0', 'rg0', 'pc0', 'co0'];
 
     let captures = [];
     let recording = false;
@@ -743,8 +751,8 @@ document.addEventListener('DOMContentLoaded', () => {
         last_name: 'ln0', sha256_last_name: 'ln0',
         street: 'sa0', sha256_street: 'sa0',
         city: 'ct0',
-        region: 'st0',
-        postal_code: 'zp0',
+        region: 'rg0',
+        postal_code: 'pc0',
         country: 'co0'
     };
 
@@ -805,7 +813,7 @@ document.addEventListener('DOMContentLoaded', () => {
             } else {
                 let addrCount = 1;
                 for (const k of keys) {
-                    const m = k.match(/^(fn|ln|sa|ct|st|zp|pc|rg|co)(\d+)$/);
+                    const m = k.match(/^(fn|ln|sa|ct|pc|rg|co)(\d+)$/);
                     if (m) addrCount = Math.max(addrCount, parseInt(m[2], 10) + 1);
                 }
                 ordered.forEach(k => {
