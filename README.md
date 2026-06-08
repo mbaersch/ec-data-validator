@@ -101,7 +101,7 @@ By default the recording stops when you close the Side Panel (toggle the option 
 ## Permissions
 
 - `storage` — persist recording state and captures across SW lifecycle
-- `sidePanel` — UI placement
+- `sidePanel` — UI placement (Chrome/Edge). Opera uses the `sidebar_action` manifest key instead and needs no permission; `chrome.sidePanel` is feature-detected so the same build runs in both.
 - `webRequest` — observe Google Ads and GA4 requests (read-only, no blocking, no modification)
 - `tabs` — read the active tab URL to pre-fill the recording URL field
 - `host_permissions` (static): `googleadservices.com/{pagead,ccm}/*`, `www.google.com/{pagead,ccm}/*`, and the GA4 collect endpoints `*.google-analytics.com/g/collect*` and `*.analytics.google.com/g/collect*` — the **target** domains
@@ -130,6 +130,10 @@ lightTest()          // 30s diagnostic listener that logs every match
 ```
 
 ## Changelog
+
+### v2.5.3
+
+- **Opera compatibility.** The extension is built around Chrome's `side_panel` / `chrome.sidePanel`, which Opera does not implement — it exposes its sidebar via the `sidebar_action` manifest key and `chrome.sidebarAction` instead. Two changes make a single codebase load in both: (1) the `chrome.sidePanel.setPanelBehavior` call in the service worker is now feature-detected, so its absence in Opera no longer throws at SW top level and aborts the whole worker (which previously killed recording too); (2) a `sidebar_action` manifest key mirrors the `side_panel` panel, so Opera shows the validator in its sidebar. Chrome ignores `sidebar_action` (manifest warning only) and Opera ignores `side_panel` — each browser picks its own key. No new permissions; the `sidePanel` permission stays declared for Chrome and merely produces a harmless "unknown permission" warning in Opera.
 
 ### v2.5.2
 

@@ -1,8 +1,17 @@
 console.log('[ec-validator] background.js loaded at', new Date().toISOString());
 
-chrome.sidePanel
-  .setPanelBehavior({ openPanelOnActionClick: true })
-  .catch(err => console.error(err));
+// chrome.sidePanel exists only in Chrome/Edge. Opera (and Firefox) expose the
+// sidebar via sidebar_action / chrome.sidebarAction and have no chrome.sidePanel
+// at all — touching it unguarded throws a TypeError at the SW top level, which
+// aborts service-worker registration and takes the whole extension (recording
+// included) down with it. Feature-detect so the SW boots on every Chromium
+// browser; the panel UX itself is wired per-browser via the manifest
+// (side_panel for Chrome, sidebar_action for Opera).
+if (chrome.sidePanel && chrome.sidePanel.setPanelBehavior) {
+  chrome.sidePanel
+    .setPanelBehavior({ openPanelOnActionClick: true })
+    .catch(err => console.error(err));
+}
 
 const RING_SIZE = 50;
 const STATIC_PATTERNS = [
