@@ -461,6 +461,61 @@ function classifySource(host, pathname) {
   return 'ads';
 }
 
+// UTF-8-sichere base64-Dekodierung. atob() liefert einen Binary-String
+// (Latin-1); fuer korrekte Umlaute o.ae. muessen die Bytes durch TextDecoder.
+// Buffer existiert im Service Worker nicht.
+function decodeBase64Utf8(b64) {
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new TextDecoder('utf-8').decode(bytes);
+}
+
+function looksLikeGa4Path(s) {
+  return s.startsWith('/g/collect') || s.startsWith('/collect') || s.startsWith('/gtag/js');
+}
+
+// Erkennt getarnte GA4-Requests, die nicht am Standardpfad mit erkennbaren
+// Standardparametern ankommen. Zwei Faelle:
+//   A) Stape Custom Loader: der echte GA4-Pfad (z.B. /g/collect?v=2&tid=...)
+//      steckt base64-codiert in einem Query-Parameter der getarnten URL.
+//   B) Klartext-Custom-Pfad (Tag Gateway / sGTM mit kryptischem Pfad): der
+//      Pfad traegt kein "collect", aber die Query ist eindeutig GA4.
+// Rueckgabe:
+//   { kind: 'stape-b64', url }  -> synthetische GA4-URL fuer das Parsing
+//   { kind: 'custom-path', url } -> Original-URL (Parameter sind schon Klartext)
+//   { kind: 'skip' }            -> reiner gtag/js-Loader, traegt kein Event
+//   null                        -> kein getarnter GA4-Request
+function tryDecodeCustomLoader(url) {
+  let u;
+  try { u = new URL(url); } catch (e) { return null; }
+
+  // Fall A: Stape base64 transport. Jeden Query-Wert als (URL-codiertes)
+  // base64 testen; treffer, wenn das Ergebnis ein GA4-Pfad ist.
+  for (const [, value] of u.searchParams) {
+    if (!value || value.length < 10) continue;
+    let decoded;
+    try { decoded = decodeBase64Utf8(decodeURIComponent(value)); } catch (e) { continue; }
+    if (looksLikeGa4Path(decoded)) {
+      if (decoded.startsWith('/gtag/js')) return { kind: 'skip' };
+      return { kind: 'stape-b64', url: 'https://' + u.host + decoded };
+    }
+  }
+
+  // Fall B: Klartext-Custom-Pfad. Bewusst streng (v=2 + gueltige G-Mess-ID +
+  // Eventname), um Fehlalarme bei beliebigen Domain-Requests zu vermeiden.
+  const path = u.pathname || '';
+  if (!path.includes('/collect')) {
+    const v   = u.searchParams.get('v');
+    const tid = u.searchParams.get('tid');
+    const en  = u.searchParams.get('en');
+    if (v === '2' && tid && /^G-[A-Z0-9]+$/i.test(tid) && en) {
+      return { kind: 'custom-path', url };
+    }
+  }
+  return null;
+}
+
 function broadcast(msg) {
   chrome.runtime.sendMessage(msg).catch(() => { /* no listeners — ignore */ });
 }
@@ -515,9 +570,20 @@ function handleRequest(details) {
 
   const transport = isGoogleHost(host) ? 'google' : 'first-party';
 
-  const { em, eme, queryParams, bodyParams } = extractAllParams(details.url, details.requestBody);
-  const userData = extractUserData(details.url, details.requestBody);
-  const conversion = extractConversionData(queryParams, bodyParams, pathname);
+  // Getarnte GA4-Requests (Stape-base64 / Klartext-Custom-Pfad) koennen nur auf
+  // first-party-Transporten auftreten; Google-Endpunkte sind immer Standard.
+  const decoded = (transport === 'first-party') ? tryDecodeCustomLoader(details.url) : null;
+  if (decoded && decoded.kind === 'skip') return; // reiner gtag/js-Loader, kein Event
+  const customLoader = decoded ? decoded.kind : null; // null | 'stape-b64' | 'custom-path'
+  // Bei Stape-base64 stecken die GA4-Parameter im decodierten Pfad; alle
+  // Extraktion laeuft daher gegen die synthetische URL. Bei custom-path sind die
+  // Parameter bereits Klartext in der Original-URL.
+  const effectiveUrl = (customLoader === 'stape-b64') ? decoded.url : details.url;
+  const effectivePath = customLoader ? '/g/collect' : pathname;
+
+  const { em, eme, queryParams, bodyParams } = extractAllParams(effectiveUrl, details.requestBody);
+  const userData = extractUserData(effectiveUrl, details.requestBody);
+  const conversion = extractConversionData(queryParams, bodyParams, effectivePath);
 
   const gcsRaw = (queryParams && queryParams.gcs) || (bodyParams && bodyParams.gcs) || null;
   const gcdRaw = (queryParams && queryParams.gcd) || (bodyParams && bodyParams.gcd) || null;
@@ -541,12 +607,17 @@ function handleRequest(details) {
 
   if (!state.recording) return;
 
+  // first-party-Requests (inkl. decodierter Custom-Loader) kommen nur in den
+  // Ring, wenn sie einen Identifier tragen (user_data / em / eme) oder einen
+  // GA4/Ads-Pfad-Marker haben. Getarnte Custom-Loader haben nie einen Marker im
+  // Original-Pfad, landen also genau dann im Ring, wenn user_data/em/eme erkannt
+  // wurde — das eigentliche Ziel der Extension.
   if (transport === 'first-party') {
     const hasPathMarker = /\/(ccm|pagead|g\/collect)(\/|$)/.test(pathname);
     if (!hasPathMarker && !em && !eme && !userData) return;
   }
 
-  const source = classifySource(host, pathname);
+  const source = customLoader ? 'ga' : classifySource(host, pathname);
 
   const capture = {
     ts: details.timeStamp,
@@ -562,7 +633,9 @@ function handleRequest(details) {
     bodyParams,
     truncated: false,
     source,
-    transport
+    transport,
+    customLoader,                                          // null | 'stape-b64' | 'custom-path'
+    decodedUrl: customLoader === 'stape-b64' ? effectiveUrl : null
   };
   enforceCap(capture);
   state.captures.push(capture);

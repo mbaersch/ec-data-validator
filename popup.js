@@ -922,6 +922,19 @@ document.addEventListener('DOMContentLoaded', () => {
         return `<div class="cap-card-conv">${segs.join('<span class="conv-sep">·</span>')}</div>`;
     }
 
+    // Kennzeichnet getarnte GA4-Transporte, die erst per Custom-Loader-Decode
+    // als GA4 erkannt wurden (Stape-base64 bzw. Klartext-Custom-Pfad).
+    function customLoaderPill(c) {
+        if (!c || !c.customLoader) return '';
+        if (c.customLoader === 'stape-b64') {
+            return '<span class="cap-pill loader-stape" title="Stape Custom Loader — GA4-Pfad war base64-codiert in der Request-URL maskiert">Stape b64</span>';
+        }
+        if (c.customLoader === 'custom-path') {
+            return '<span class="cap-pill loader-custom" title="Custom-Bereitstellungspfad (Tag Gateway / sGTM) — GA4-Request ohne Standard-/collect-Pfad">Custom-Pfad</span>';
+        }
+        return '';
+    }
+
     function renderCaptures() {
         recCount.textContent = captures.length;
         const visible = captures.filter(c => {
@@ -956,7 +969,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <span class="cap-method">${c.method}</span>
                     <span class="cap-host">${shortenUrl(c.url, c.host)}</span>
                 </div>
-                <div class="cap-card-pills">${renderPills(c.em, c.eme, c.userData)}${consentMarkerPill(c.consent)}</div>
+                <div class="cap-card-pills">${customLoaderPill(c)}${renderPills(c.em, c.eme, c.userData)}${consentMarkerPill(c.consent)}</div>
                 ${renderConversionLine(c.conversion)}
             </div>`;
         }).join('');
