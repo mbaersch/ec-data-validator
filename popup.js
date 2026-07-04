@@ -200,9 +200,13 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    async function sha256(msg) {
+    async function sha256(msg, preserveCase) {
         if (!msg || msg.trim() === '') return null;
-        const buf = new TextEncoder().encode(msg.toLowerCase().trim());
+        // Default: lower-case + trim (the minimum any ad platform / template
+        // does). preserveCase keeps the exact (trimmed) casing — used for the
+        // "raw" candidate so a value hashed WITHOUT lower-casing (itself a
+        // normalization step) is detectable rather than silently assumed.
+        const buf = new TextEncoder().encode(preserveCase ? msg.trim() : msg.toLowerCase().trim());
         const bytes = new Uint8Array(await crypto.subtle.digest('SHA-256', buf));
         const hex = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
         let bin = '';
@@ -275,7 +279,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return `<span class="match-warn">MATCH</span><span class="fmt-warn" title="${tip}">RAW · NOT NORMALIZED</span>`;
         }
         if (r.normalizedInput) {
-            const tip = 'Match after normalizing your input (e.g. 004912345 → 4912345 / +49…). The sent value is correctly normalized; your entry just used a looser format.';
+            const tip = 'Match ONLY after normalizing your input (lower-case, trim, phone/number formatting). The sent value is correctly normalized — your entry just used a looser format (e.g. UPPERCASE email or 0049… phone). Hashed exactly as typed, it would NOT match.';
             return `<span class="match">MATCH</span><span class="fmt-note" title="${tip}">INPUT NORMALIZED</span>`;
         }
         return '<span class="match">MATCH</span>';
@@ -701,8 +705,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (wanted(k)) parts.push(`${k}=${encodeURIComponent(params[k])}`);
             }
         };
-        scan(cap.queryParams);
-        scan(cap.bodyParams);
+        // Providers with pre-flattened slots (TikTok's nested context.user) carry
+        // them in detectorParams; flat-param providers (Meta) have them inline in
+        // query/bodyParams. Prefer detectorParams so we don't also re-emit the
+        // top-level `event` sitting in bodyParams.
+        if (cap.detectorParams) {
+            scan(cap.detectorParams);
+        } else {
+            scan(cap.queryParams);
+            scan(cap.bodyParams);
+        }
         return parts.join('&');
     }
 
@@ -745,8 +757,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 const exp = await sha256(normalized);
                 if (!exp) return;
                 const rawVal = rawInputFor(f.verifyId, val);
-                if (rawVal && rawVal.toLowerCase().trim() !== normalized.toLowerCase().trim()) {
-                    exp.raw = await sha256(rawVal);
+                if (rawVal && rawVal.trim() !== normalized.toLowerCase().trim()) {
+                    exp.raw = await sha256(rawVal, true);
                 }
                 cmp[f.verifyId] = exp;
             }));
@@ -816,9 +828,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 h.metaAlt = await sha256(normalized.slice(1));
             }
             // Un-normalized ("raw") candidate for the not-normalized diagnostic.
+            // Case-preserving: lower-casing is itself normalization, so a raw that
+            // differs only in case must still register (UPPERCASE email → note).
             const rawVal = rawInputFor(f.id, val);
-            if (rawVal && rawVal.toLowerCase().trim() !== normalized.toLowerCase().trim()) {
-                h.raw = await sha256(rawVal);
+            if (rawVal && rawVal.trim() !== normalized.toLowerCase().trim()) {
+                h.raw = await sha256(rawVal, true);
             }
             hashes[f.id] = h;
         }));
@@ -1249,9 +1263,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (cap.provider) {
                     // Detector capture (Meta etc.): load its request string into
                     // the em field and let runUpdate render the validation below —
-                    // same place as the Google em result.
+                    // same place as the Google em result. An event without any
+                    // advanced-matching fields has nothing to validate → detail view.
                     const d = (typeof EcDetectors !== 'undefined') ? EcDetectors.byId(cap.provider) : null;
-                    if (d && d.validation) {
+                    if (d && d.validation && cap.identifiers && cap.identifiers.length) {
                         emInput.value = detectorRequestString(cap, d.validation);
                         activateTab('tab-em');
                         chrome.storage.local.set({ activeTab: 'tab-em' });
@@ -1555,8 +1570,13 @@ document.addEventListener('DOMContentLoaded', () => {
     // enabling requests it (from the checkbox's user gesture), disabling
     // revokes it. The enabledDetectors flag drives parsing in the SW; the
     // permission drives which requests the webRequest listener even sees.
-    const svcMeta = document.getElementById('svcMeta');
-    const META_ORIGINS = ['https://*.facebook.com/*'];
+    // One entry per detector — a new service adds a row here plus its object in
+    // detectors.js and a checkbox in popup.html. Origins mirror the detector's
+    // permissionOrigins.
+    const DETECTOR_TOGGLES = [
+        { elId: 'svcMeta',   flag: 'meta',   origins: ['https://*.facebook.com/*'] },
+        { elId: 'svcTiktok', flag: 'tiktok', origins: ['https://analytics.tiktok.com/*'] },
+    ];
     let enabledDetectors = {};
 
     function setDetectorFlag(id, on) {
@@ -1564,35 +1584,41 @@ document.addEventListener('DOMContentLoaded', () => {
         chrome.storage.local.set({ enabledDetectors });
     }
 
-    if (svcMeta) {
-        svcMeta.addEventListener('change', async () => {
-            if (svcMeta.checked) {
+    DETECTOR_TOGGLES.forEach(cfg => {
+        const el = document.getElementById(cfg.elId);
+        if (!el) return;
+        el.addEventListener('change', async () => {
+            if (el.checked) {
                 let granted = false;
                 try {
-                    granted = await chrome.permissions.request({ origins: META_ORIGINS });
+                    granted = await chrome.permissions.request({ origins: cfg.origins });
                 } catch (e) {
                     showError('Permission request failed: ' + e.message);
                 }
-                if (!granted) { svcMeta.checked = false; return; }
-                setDetectorFlag('meta', true);
+                if (!granted) { el.checked = false; return; }
+                setDetectorFlag(cfg.flag, true);
             } else {
-                setDetectorFlag('meta', false);
-                try { await chrome.permissions.remove({ origins: META_ORIGINS }); } catch (e) { /* ignore */ }
+                setDetectorFlag(cfg.flag, false);
+                try { await chrome.permissions.remove({ origins: cfg.origins }); } catch (e) { /* ignore */ }
             }
         });
+    });
 
-        // Load persisted flag, reconciled with the actual permission — if the
-        // user revoked facebook.com access via Chrome settings, the toggle
-        // reflects "off" even though the flag was still stored as on.
-        chrome.storage.local.get('enabledDetectors', async (res) => {
-            enabledDetectors = (res.enabledDetectors && typeof res.enabledDetectors === 'object') ? res.enabledDetectors : {};
+    // Load persisted flags, each reconciled with its actual permission — if the
+    // user revoked a host via Chrome settings, its toggle reflects "off" even
+    // though the flag was still stored as on.
+    chrome.storage.local.get('enabledDetectors', async (res) => {
+        enabledDetectors = (res.enabledDetectors && typeof res.enabledDetectors === 'object') ? res.enabledDetectors : {};
+        for (const cfg of DETECTOR_TOGGLES) {
+            const el = document.getElementById(cfg.elId);
+            if (!el) continue;
             let has = false;
-            try { has = await chrome.permissions.contains({ origins: META_ORIGINS }); } catch (e) { /* ignore */ }
-            const on = !!enabledDetectors.meta && has;
-            if (!!enabledDetectors.meta !== on) setDetectorFlag('meta', on);
-            svcMeta.checked = on;
-        });
-    }
+            try { has = await chrome.permissions.contains({ origins: cfg.origins }); } catch (e) { /* ignore */ }
+            const on = !!enabledDetectors[cfg.flag] && has;
+            if (!!enabledDetectors[cfg.flag] !== on) setDetectorFlag(cfg.flag, on);
+            el.checked = on;
+        }
+    });
 
     chrome.runtime.sendMessage({ type: 'getState' }, (res) => {
         if (!res) return;

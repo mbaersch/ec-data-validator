@@ -186,6 +186,7 @@
     .cap-pill.pii-masked { background: #f1f5f9; color: #64748b; }
     .cap-pill.meta-event { background: #e7f0fe; color: #1877f2; }
     .cap-card.source-meta { border-left: 3px solid #1877f2; padding-left: 8px; }
+    .cap-card.source-tiktok { border-left: 3px solid #ff0050; padding-left: 8px; }
 
     /* Detector validation renders in the em result area (same place as the
        Google em result). */
@@ -383,6 +384,13 @@
         <div class="settings-text">
           <div class="settings-label">Meta Pixel</div>
           <div class="settings-desc">Detect user data in Meta Pixel requests (<code>facebook.com/tr</code>). Enabling asks for permission to read <code>facebook.com</code> requests; disabling revokes it again. Advanced-matching fields (<code>em</code>, <code>ph</code>, …) are normally SHA-256 hashed by <code>fbevents.js</code> — a known field arriving unhashed is flagged as a <strong>plaintext leak</strong>.</div>
+        </div>
+      </label>
+      <label class="settings-item">
+        <input type="checkbox" id="svcTiktok">
+        <div class="settings-text">
+          <div class="settings-label">TikTok Pixel</div>
+          <div class="settings-desc">Detect user data in TikTok Pixel requests (<code>analytics.tiktok.com/api/v2/pixel</code>). Enabling asks for permission to read <code>analytics.tiktok.com</code> requests; disabling revokes it again. Advanced-matching fields in <code>context.user</code> (<code>email</code>, <code>phone_number</code>, …) are normally SHA-256 hashed client-side — a known field arriving unhashed is flagged as a <strong>plaintext leak</strong>.</div>
         </div>
       </label>
     </div>

@@ -39,6 +39,24 @@
   // do reliably without a country signal, so we leave zip+4 length as-is.
   function normZip(v)          { return String(v).trim().toLowerCase().replace(/[^a-z0-9]/g, ''); }
   function normCountry(v)      { return String(v).trim().toLowerCase(); }                 // ISO-3166-1 alpha-2
+  // phone in E.164: keep a leading '+', map a leading '00' intl prefix to '+',
+  // strip everything else non-digit. Used by providers that hash the '+' form
+  // (TikTok, Google) — unlike Meta, which hashes digits only without the '+'.
+  function normPhoneE164(v) {
+    const c = String(v).replace(/[^\d+]/g, '');
+    if (c.startsWith('+')) return '+' + c.slice(1).replace(/\+/g, '');
+    const d = c.replace(/\+/g, '');
+    return d.startsWith('00') ? '+' + d.slice(2) : d;
+  }
+
+  // UTF-8-safe base64 decode (for the base64-in-querystring GET transport).
+  // atob + TextDecoder both exist in the service worker and the panel.
+  function decodeBase64Utf8(b64) {
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new TextDecoder('utf-8').decode(bytes);
+  }
 
   // -------------------------------------------------------------------------
   // Meta (Facebook) Pixel
@@ -199,10 +217,150 @@
   };
 
   // -------------------------------------------------------------------------
+  // TikTok Pixel
+  // -------------------------------------------------------------------------
+  //
+  // A browser pixel hit goes to analytics.tiktok.com/api/v2/pixel (or the
+  // shopify_pixel / /act batch variants) as a POST with a JSON body, OR as a GET
+  // with the same JSON base64-encoded in ?analytics_message= . Unlike Meta, the
+  // identifiers live in a NESTED JSON object (context.user) rather than flat
+  // ud[...] params, and the values are SHA-256 hex. We flatten context.user into
+  // synthetic `user[<field>]` slots so the same panel plumbing (hashSlotRe,
+  // detectorRequestString, extractDetectorHashes) that drives Meta validates
+  // TikTok too.
+
+  const TIKTOK_USER_FIELD = {
+    email:        { bucket: 'email',      label: 'Email' },
+    phone_number: { bucket: 'phone',      label: 'Phone' },
+    first_name:   { bucket: 'firstName',  label: 'First name' },
+    last_name:    { bucket: 'lastName',   label: 'Last name' },
+    city:         { bucket: 'city',       label: 'City' },
+    state:        { bucket: 'region',     label: 'State' },   // st = state/region
+    zip_code:     { bucket: 'postal',     label: 'Zip' },
+    country:      { bucket: 'country',    label: 'Country' },
+    external_id:  { bucket: 'externalId', label: 'External ID' },
+  };
+
+  const TIKTOK_STANDARD_EVENTS = new Set([
+    'Pageview', 'ViewContent', 'Search', 'AddToCart', 'AddToWishlist',
+    'InitiateCheckout', 'AddPaymentInfo', 'CompletePayment', 'PlaceAnOrder',
+    'CompleteRegistration', 'Contact', 'Subscribe', 'SubmitForm',
+    'ClickButton', 'Download',
+  ]);
+
+  function isTiktokHost(host) {
+    const h = (host || '').toLowerCase();
+    return h === 'analytics.tiktok.com' || h.endsWith('.analytics.tiktok.com');
+  }
+
+  // Event endpoints are /api/v2/pixel and /api/v2/pixel/act (plus shopify_pixel).
+  // Heartbeat/telemetry sub-paths carry no event and are ignored.
+  function isTiktokPixelPath(pathname) {
+    const p = pathname || '';
+    if (!/\/api\/v2\/(shopify_)?pixel(\/|$)/.test(p)) return false;
+    if (/\/(inter|perf|monitor|enrich_ipv6)(\/|$)/.test(p)) return false;
+    return true;
+  }
+
+  // Recover the TikTok payload's event + context from the capture context.
+  // POST: background.js flattened the JSON top level, so bodyParams.context is a
+  // JSON string and bodyParams.event the event name. GET: the whole payload sits
+  // base64-encoded in the analytics_message query param.
+  function tiktokPayload(ctx) {
+    const q = ctx.queryParams || {};
+    const b = ctx.bodyParams || {};
+    if (q.analytics_message) {
+      try {
+        const obj = JSON.parse(decodeBase64Utf8(decodeURIComponent(q.analytics_message)));
+        if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
+          return { event: obj.event, context: obj.context, transport: 'base64' };
+        }
+      } catch (e) { /* not a decodable TikTok message */ }
+    }
+    let context = null;
+    if (b.context && typeof b.context === 'string') {
+      try { context = JSON.parse(b.context); } catch (e) { context = null; }
+    } else if (b.context && typeof b.context === 'object') {
+      context = b.context;
+    }
+    return { event: b.event != null ? b.event : null, context, transport: 'standard' };
+  }
+
+  const tiktokDetector = {
+    id: 'tiktok',
+    label: 'TikTok Pixel',
+    permissionOrigins: ['https://analytics.tiktok.com/*'],
+
+    match(host, pathname) {
+      return isTiktokHost(host) && isTiktokPixelPath(pathname);
+    },
+
+    validation: {
+      title: 'TikTok Pixel',
+      note: 'email lower/trim · phone E.164 (+, no leading 0) · name/city letters only · zip no space/dash · country 2-letter',
+      eventParam: 'event',
+      hashSlotRe: /^(user)\[([\w]+)\]$/,
+      fields: {
+        email:        { verifyId: 'v_email',   label: 'Email',      normalize: normTrimLower },
+        phone_number: { verifyId: 'v_phone',   label: 'Phone',      normalize: normPhoneE164 },
+        first_name:   { verifyId: 'v_fn',      label: 'First name', normalize: normLettersLower },
+        last_name:    { verifyId: 'v_ln',      label: 'Last name',  normalize: normLettersLower },
+        city:         { verifyId: 'v_city',    label: 'City',       normalize: normLettersLower },
+        state:        { verifyId: 'v_region',  label: 'State',      normalize: normLettersLower },
+        zip_code:     { verifyId: 'v_postal',  label: 'Zip',        normalize: normZip },
+        country:      { verifyId: 'v_country', label: 'Country',    normalize: normCountry },
+      },
+      labels: { external_id: 'External ID' },
+    },
+
+    // ctx: { url, host, pathname, queryParams, bodyParams }
+    parse(ctx) {
+      const { event, context, transport } = tiktokPayload(ctx);
+      if (!event || typeof event !== 'string') return null;
+      if (event === 'EnrichAM') return null; // internal advanced-matching probe
+
+      const cxt = (context && typeof context === 'object') ? context : {};
+      const pixel = (cxt.pixel && typeof cxt.pixel === 'object') ? cxt.pixel : {};
+      const code = pixel.code != null ? String(pixel.code)
+                 : (pixel.codes != null ? String(pixel.codes).split('|')[0] : null);
+      if (!code) return null; // a pixel event always carries its pixel id
+
+      const user = (cxt.user && typeof cxt.user === 'object' && !Array.isArray(cxt.user)) ? cxt.user : {};
+      const identifiers = [];
+      // Flat hash slots the panel can re-parse; always carries the event so the
+      // request string shown in the PII field mirrors the Meta one.
+      const hashParams = { event };
+      for (const k of Object.keys(user)) {
+        const def = TIKTOK_USER_FIELD[k];
+        if (!def) continue;
+        const v = user[k];
+        if (v == null || String(v).trim() === '') continue;
+        const hashed = looksHashedSha256(v);
+        identifiers.push({
+          field: k, bucket: def.bucket, label: def.label,
+          hashed, plaintext: !hashed, masked: false, mask: null,
+        });
+        hashParams['user[' + k + ']'] = String(v);
+      }
+
+      return {
+        provider: 'tiktok',
+        transport: transport || 'standard',
+        event,
+        standardEvent: TIKTOK_STANDARD_EVENTS.has(event),
+        providerId: code,
+        identifiers,
+        consent: null,           // TikTok pixel surfaces no consent signal
+        hashParams,
+      };
+    },
+  };
+
+  // -------------------------------------------------------------------------
   // Registry
   // -------------------------------------------------------------------------
 
-  const registry = [metaDetector];
+  const registry = [metaDetector, tiktokDetector];
 
   root.EcDetectors = {
     registry,

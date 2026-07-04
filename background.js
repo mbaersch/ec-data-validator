@@ -604,6 +604,12 @@ function handleDetectorRequest(detector, details, host, pathname) {
     providerId: parsed.providerId || null,
     identifiers: parsed.identifiers || [],
     detectorConsent: parsed.consent || null,
+    // Flat hash slots (e.g. TikTok's nested context.user flattened to
+    // user[email]=<hash>). Kept in its own field — enforceCap only stubs
+    // query/bodyParams, so these small validatable slots survive truncation of
+    // a large JSON body. Undefined for flat-param providers like Meta, whose
+    // slots already live in query/bodyParams.
+    detectorParams: parsed.hashParams || null,
     // Google-shaped fields stay null so the existing panel code paths skip it.
     em: null, eme: null, userData: null, conversion: null, consent: null,
     queryParams,
