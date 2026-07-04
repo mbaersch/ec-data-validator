@@ -162,6 +162,7 @@
     .rec-row button.icon-btn:disabled { opacity: 0.4; cursor: not-allowed; }
     .rec-actions { display: flex; gap: 6px; }
     .rec-status { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-muted); }
+    .rec-count { font-size: 11px; color: var(--text-muted); }
     .rec-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--text-fainter); }
     .rec-dot.live { background: #dc2626; box-shadow: 0 0 0 0 rgba(220,38,38,0.5); animation: rec-pulse 1.5s infinite; }
     @keyframes rec-pulse { 0% { box-shadow: 0 0 0 0 rgba(220,38,38,0.5); } 70% { box-shadow: 0 0 0 6px rgba(220,38,38,0); } 100% { box-shadow: 0 0 0 0 rgba(220,38,38,0); } }
@@ -291,7 +292,7 @@
     </div>
     <div class="rec-row" style="margin-top:8px; justify-content:space-between;">
       <span class="rec-status"><span id="recDot" class="rec-dot"></span><span id="recStatusText">idle</span></span>
-      <span class="rec-status"><span id="recCount">0</span><span>/<span id="recRing">50</span> captures</span></span>
+      <span class="rec-count"><span id="recCount">0</span> / <span id="recRing">50</span> captures</span>
       <div class="rec-actions">
         <button id="recExport" title="Copy captures as JSON to clipboard">Export</button>
         <button id="recClear" class="danger">Clear</button>
