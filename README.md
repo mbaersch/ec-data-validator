@@ -56,17 +56,43 @@ Use it to verify that ec tracking is working and the data leaving the browser ac
 
 <img width="664" height="414" alt="image" src="https://github.com/user-attachments/assets/0f804a14-317b-4ced-821f-b71f971c3bbf" />
 
+**PII-leak detectors for non-Google ad platforms** (optional, all default-off):
+
+Beyond Google Ads / GA4, the extension can flag when personal data leaves the browser toward other advertising services — useful to check that identifiers are actually **hashed** (and correctly normalized) before they go out, and to catch **plaintext leaks**. Five detectors ship:
+
+- **Meta Pixel** — advanced-matching fields (`ud[em]`, `ud[ph]`, `ud[fn]`, …) on `facebook.com` / `connect.facebook.net`
+- **TikTok Pixel** — the nested `context.user` object (`email`, `phone`, …) on `analytics.tiktok.com`
+- **Pinterest** — the `pd` enhanced-match payload (JSON or `pd[em]` bracket form) on `ct.pinterest.com`
+- **Bing UET** — the `pid` sub-querystring (`em`, `ph`, `fn`, `ln`) on `bat.bing.com` / `commerce.bing.com`
+- **LinkedIn Insight Tag** — the hashed email (`hem`) that rides in the gzip-compressed `/wa/` POST on `px.ads.linkedin.com` (the panel decodes `base64(gzip(JSON))` transparently)
+
+Each detector is enabled individually in the **Settings** tab. Enabling one triggers a **runtime permission request** for just that service's origins (via `optional_host_permissions`, so the installed manifest never changes); disabling revokes it again. Captured requests appear in the same clickable card list, each **tinted per provider** (Meta cool-blue, TikTok fuchsia, Pinterest red, Bing teal, LinkedIn azure) so the source is obvious at a glance.
+
+- **Leak flagging**: a known identifier field arriving **unhashed** (plaintext) is called out as a leak. Hashed fields show a neutral identifier pill.
+- **Hash validation with normalization diagnostics**: click a card to load its hash slots into the shared PII Parameters field, then enter the known plaintext. The match is **case-sensitive** and reports three states — a clean **MATCH** (green), **MATCH + INPUT NORMALIZED** (your input was looser than the canonical form, e.g. `UPPERCASE` or a `0049…` phone — the tool normalized it for you), and **MATCH + RAW · NOT NORMALIZED** (orange): the hash reproduces from your *raw* input, which means the tag hashed an un-normalized value that will **not** match on the platform side — a real implementation defect the green states would otherwise hide.
+- **Per-platform normalization**: each service's documented rules are applied — Meta/Pinterest phone without `+`, TikTok/Bing phone as E.164 with `+`; Meta/Pinterest city with spaces removed; Pinterest email with all spaces stripped; etc. Pinterest additionally accepts **SHA-256, SHA-1 or MD5** — the algorithm is auto-detected per hash length and validated accordingly.
+- **`external_id` is treated as opaque**: it gets its own neutral pill and is **never** flagged as a leak (it is an opaque CRM/customer ID, not PII), and when hashed it is validated exactly / case-preserving without a false RAW warning. Meta's custom-data variant `cd[external_id]` is recognized too.
+- **Bing e-commerce**: a Bing custom event (`evt=custom`) is surfaced by its real action from `ea` (`purchase`, `refund`, `add_to_cart`, …) instead of a flat "custom", and its conversion value (`ecomm_totalvalue` / `gv`, plus currency) is shown as a value pill on the card.
+
 ## Install
 
-Manifest V3 unpacked extension. Requires Chrome 114+ (Side Panel API).
+**Recommended — from the Chrome Web Store:**
+
+<https://chromewebstore.google.com/detail/enhanced-conversion-data/oofghodijgflljjckgomndgkobnahhcp>
+
+One click to install; updates arrive automatically. This is the right choice for everyday use.
+
+The extension icon opens a Side Panel — not a popup. The panel persists across tab switches. Requires Chrome 114+ (Side Panel API); also runs in Edge and Opera (Opera uses its own sidebar).
+
+### From source (for development or forking)
+
+If you want to modify the extension or run an unreleased version, load it unpacked:
 
 1. Clone or download this repository
 2. Open `chrome://extensions/`
 3. Enable "Developer mode" (top right)
 4. Click "Load unpacked" and select the project folder
 5. Pin the extension if you want it in the toolbar
-
-The extension icon opens a Side Panel — not a popup. The panel persists across tab switches.
 
 ## Use
 
@@ -105,7 +131,7 @@ By default the recording stops when you close the Side Panel (toggle the option 
 - `webRequest` — observe Google Ads and GA4 requests (read-only, no blocking, no modification)
 - `tabs` — read the active tab URL to pre-fill the recording URL field
 - `host_permissions` (static): `googleadservices.com/{pagead,ccm}/*`, `www.google.com/{pagead,ccm}/*`, and the GA4 collect endpoints `*.google-analytics.com/g/collect*` and `*.analytics.google.com/g/collect*` — the **target** domains
-- `optional_host_permissions: ["<all_urls>"]` — granted **per-site at runtime** when you click **Permit** for the **initiator** origin (the page where the conversion fires from). The extension never auto-requests permissions — every site grant requires an explicit user action.
+- `optional_host_permissions: ["<all_urls>"]` — granted **per-site at runtime** when you click **Permit** for the **initiator** origin (the page where the conversion fires from), and — for the non-Google detectors — for the specific service origins (`facebook.com`, `analytics.tiktok.com`, `ct.pinterest.com`, `bat.bing.com`, `px.ads.linkedin.com`, …) when you enable that detector in Settings. The extension never auto-requests permissions — every grant requires an explicit user action, and toggling a detector off revokes its origins again.
 
 The extension does not transmit anything anywhere. All processing is local.
 
@@ -116,6 +142,7 @@ The codebase is small and unbundled — no build step. Edit, reload the extensio
 - `manifest.json` — MV3 config
 - `background.js` — service worker, handles recording and the message API
 - `popup.html` / `popup.js` — Side Panel UI
+- `detectors.js` — provider-agnostic registry for the non-Google PII-leak detectors (Meta / TikTok / Pinterest / Bing / LinkedIn); loaded by the service worker via `importScripts` and by the panel
 
 For diagnostic helpers in the service worker console (`chrome://extensions/` → click "Service worker"):
 
@@ -130,6 +157,20 @@ lightTest()          // 30s diagnostic listener that logs every match
 ```
 
 ## Changelog
+
+### v2.7.0
+
+- **PII-leak detectors for five non-Google ad platforms** (Meta Pixel, TikTok Pixel, Pinterest, Bing UET, LinkedIn Insight Tag), all opt-in and default-off. Each is toggled in Settings and requests a **runtime permission** for only its own origins via `optional_host_permissions`, so the installed manifest — and the Chrome Web Store review state — never changes. Captured requests join the existing card list, **tinted per provider** (Meta cool-blue, TikTok fuchsia, Pinterest red, Bing teal, LinkedIn azure). A provider-agnostic registry (`detectors.js`) drives capture (`match` / `parse`) and validation from one data object per service, and the service worker handles four payload shapes — Meta's flat `ud[em]` params, TikTok's nested `context.user` JSON, Pinterest's `pd` JSON/bracket form, and Bing's `pid` sub-querystring.
+- **Normalization diagnostics on hash validation.** Verification is now **case-sensitive** and distinguishes a clean **MATCH** from **MATCH + INPUT NORMALIZED** (your comparison value was looser than the canonical form — e.g. uppercase email or a `0049…` phone) and from **MATCH + RAW · NOT NORMALIZED** (orange): the hash only reproduces from the *un-normalized* raw value, so it will never match on the platform side — a real defect that a plain green "match" would mask. Per-platform rules are applied (phone with/without `+` per platform, city-space handling, Pinterest's space-stripped email). The same `0049…` → `+49…` E.164 handling was aligned for the Google path too.
+- **Pinterest multi-algorithm hashing.** Pinterest accepts SHA-256, SHA-1 or MD5; the algorithm is auto-detected per hash length (64/40/32 hex) and validated accordingly (a compact MD5 was added since Web Crypto has none).
+- **`external_id` handled as opaque.** It shows a neutral pill, is never flagged as a plaintext leak, and — when hashed — validates exactly / case-preserving with its own verify field, no false RAW warning. Meta's `cd[external_id]` custom-data variant is recognized.
+- **Bing e-commerce events.** A Bing custom event is named by its real action (`ea`: `purchase` / `refund` / `add_to_cart`, falling back to the ecommerce `pagetype`) instead of a flat "custom", and its conversion value (`ecomm_totalvalue` / `gv`, plus currency) is shown as a value pill.
+- **LinkedIn gzip decoding.** LinkedIn's `hem` (SHA-256 email) travels in a `base64(gzip(JSON))` `/wa/` POST body; the detector decompresses it (async, via `DecompressionStream`) and validates the email. Only hits that actually carry a `hem` are captured.
+- Fix: even spacing in the "N / 50 captures" counter (a stray flex gap put two spaces before the slash).
+
+### v2.6.0
+
+- **Stape custom-loader GA4 detection.** GA4 `/g/collect` traffic routed through a Stape "custom loader" arrives base64-encoded on a disguised first-party path; these are now decoded and recognized as GA4 captures so user data flowing through them is no longer missed.
 
 ### v2.5.3
 
