@@ -114,7 +114,15 @@ document.addEventListener('DOMContentLoaded', () => {
         { id: 'v_phone',  label: 'Phone',      placeholder: '+4912345678',      hashKeys: ['sha256_phone_number', 'pn'], normalize: normalizePhone },
         { id: 'v_fn',     label: 'First Name', placeholder: 'Max',              hashKeys: ['sha256_first_name', 'fn0'] },
         { id: 'v_ln',     label: 'Last Name',  placeholder: 'Mustermann',       hashKeys: ['sha256_last_name', 'ln0'] },
-        { id: 'v_street', label: 'Street',     placeholder: 'Hauptstr. 1',      hashKeys: ['sha256_street', 'sa0'], normalize: normalizeStreet }
+        { id: 'v_street', label: 'Street',     placeholder: 'Hauptstr. 1',      hashKeys: ['sha256_street', 'sa0'], normalize: normalizeStreet },
+        // Detector-only compare fields: Meta hashes city/state/zip/country,
+        // whereas Google sends them in plaintext. Empty hashKeys means they
+        // never resolve from a Google token, so they only ever appear in a
+        // detector validation view (activated by the detector's profile).
+        { id: 'v_city',    label: 'City',    placeholder: 'Berlin', hashKeys: [] },
+        { id: 'v_region',  label: 'State',   placeholder: 'BE',     hashKeys: [] },
+        { id: 'v_postal',  label: 'Zip',     placeholder: '10115',  hashKeys: [] },
+        { id: 'v_country', label: 'Country', placeholder: 'DE',     hashKeys: [] }
     ];
     const hashKeyToVerifyId = {};
     verifyFields.forEach(f => f.hashKeys.forEach(k => { hashKeyToVerifyId[k] = f.id; }));
@@ -445,13 +453,21 @@ document.addEventListener('DOMContentLoaded', () => {
         return `<div style="margin-bottom:8px;"><span style="font-size:10px; padding:3px 8px; border-radius:4px; background:${bg}; color:${fg}; font-weight:600; letter-spacing:0.3px;">${type}</span></div>`;
     }
 
-    function renderVerifyFields(activeKeys) {
-        const visible = verifyFields.filter(f => {
-            for (const ak of activeKeys) {
-                if (resolveVerifyId(ak) === f.id) return true;
-            }
-            return false;
-        });
+    // Google callers resolve tokens/keys to verify-field ids first (via
+    // tokensToVerifyIds); the detector view passes its profile's verifyIds
+    // directly. Either way this renders the compare inputs for exactly the
+    // given field ids.
+    function tokensToVerifyIds(activeKeys) {
+        const ids = new Set();
+        for (const ak of activeKeys) {
+            const id = resolveVerifyId(ak);
+            if (id) ids.add(id);
+        }
+        return ids;
+    }
+
+    function renderVerifyFieldsByIds(idSet) {
+        const visible = verifyFields.filter(f => idSet.has(f.id));
         const sig = visible.map(f => f.id).join(',');
 
         if (visible.length === 0) {
@@ -589,6 +605,125 @@ document.addEventListener('DOMContentLoaded', () => {
         target.innerHTML = html;
     }
 
+    // ---------- Detector requests in the em field ----------
+    // Meta (and later TikTok/Pinterest/Bing) spread advanced-matching data across
+    // several request params, so a single "em" value doesn't fit. A click on a
+    // detector card loads that request's hash params into the same em field, and
+    // runUpdate detects the format and renders the validation list + verify box
+    // below — exactly where the Google em result appears. All provider specifics
+    // come from the `validation` profile in detectors.js; adding a provider is a
+    // data change there, not new code here.
+
+    // Find the validation profile whose hash-slot pattern matches any of the keys.
+    function detectorProfileForKeys(keys) {
+        if (typeof EcDetectors === 'undefined') return null;
+        for (const d of EcDetectors.registry) {
+            const v = d.validation;
+            if (!v) continue;
+            for (const k of keys) {
+                if (v.hashSlotRe.test(k)) return v;
+            }
+        }
+        return null;
+    }
+
+    // Parse an em-field string that is actually a detector request (key=value&…
+    // with e.g. Meta ud[...] params). Returns { profile, params, event } or null
+    // so Google em/eme token strings fall through to the normal decoder.
+    function parseDetectorRequest(raw) {
+        let s = (raw || '').trim();
+        if (!s) return null;
+        if (s.includes('~') || /^eme?=/.test(s)) return null; // Google em/eme token string
+        if (s.startsWith('?')) s = s.slice(1);
+        let sp;
+        try { sp = new URLSearchParams(s); } catch (e) { return null; }
+        const keys = [...sp.keys()];
+        if (keys.length === 0) return null;
+        const profile = detectorProfileForKeys(keys);
+        if (!profile) return null;
+        const params = {};
+        for (const [k, v] of sp) { if (!(k in params)) params[k] = v; }
+        const event = profile.eventParam ? (params[profile.eventParam] || null) : null;
+        return { profile, params, event };
+    }
+
+    // Build the em-field string for a detector capture: its hash params plus the
+    // event param, so the field carries everything the validator needs.
+    function detectorRequestString(cap, profile) {
+        const parts = [];
+        const wanted = (k) => (profile.eventParam && k === profile.eventParam) || profile.hashSlotRe.test(k);
+        const scan = (params) => {
+            for (const k of Object.keys(params || {})) {
+                if (wanted(k)) parts.push(`${k}=${encodeURIComponent(params[k])}`);
+            }
+        };
+        scan(cap.queryParams);
+        scan(cap.bodyParams);
+        return parts.join('&');
+    }
+
+    // Pull the hash values out of a parsed detector request. Masked reps carry no
+    // hash to validate and are skipped. First value per field wins.
+    function extractDetectorHashes(params, profile) {
+        const out = [];
+        const seen = new Set();
+        for (const k of Object.keys(params || {})) {
+            const m = profile.hashSlotRe.exec(k);
+            if (!m) continue;
+            const field = m[2];
+            if (seen.has(field)) continue;
+            const value = params[k];
+            if (value == null || String(value).trim() === '') continue;
+            seen.add(field);
+            const fv = profile.fields[field];
+            out.push({
+                field,
+                label: (fv && fv.label) || (profile.labels && profile.labels[field]) || field,
+                value: String(value),
+                verifyId: fv ? fv.verifyId : null,
+                normalize: fv ? fv.normalize : null
+            });
+        }
+        return out;
+    }
+
+    // Render a detector request's validation into the em result area. Compare
+    // hashes use the profile's own normalization (Meta hashes differently than
+    // Google — that's the point).
+    async function renderDetectorValidation(det, fields) {
+        const target = document.getElementById('emResult');
+        const cmp = {};
+        await Promise.all(fields
+            .filter(f => f.verifyId && f.normalize && verifyState[f.verifyId])
+            .map(async f => { cmp[f.verifyId] = await sha256(f.normalize(verifyState[f.verifyId])); }));
+
+        const evName = det.event ? ' · ' + escapeHtml(det.event) : '';
+        const note = det.profile.note ? ` (${escapeHtml(det.profile.note)})` : '';
+        let html = `<div class="meta-head">${escapeHtml(det.profile.title)}${evName}</div>`;
+        html += `<p class="meta-note">Advanced-matching hashes from this request. Enter plaintext below — values are hashed with this provider's normalization${note} and matched.</p>`;
+        if (fields.length === 0) {
+            html += '<table class="res-table"><tr><td>No advanced-matching hashes in this request.</td></tr></table>';
+            target.innerHTML = html;
+            return;
+        }
+        html += '<table class="res-table">';
+        fields.forEach(f => {
+            const enc = detectHashEncoding(f.value);
+            let status = '';
+            if (f.verifyId && cmp[f.verifyId]) {
+                status = hashMatches(f.value, cmp[f.verifyId])
+                    ? '<span class="match">MATCH</span>'
+                    : '<span class="no-match">ERR</span>';
+            }
+            status += encPill(enc);
+            const statusBlock = status.trim() ? `<div class="status-line">${status}</div>` : '';
+            const shown = f.value.length > 70 ? f.value.slice(0, 70) + '…' : f.value;
+            html += `<tr><td><b>${escapeHtml(f.label)}</b></td><td><code>${escapeHtml(shown)}</code>${statusBlock}</td></tr>`;
+        });
+        html += '</table>';
+        target.innerHTML = html;
+    }
+
     function persist() {
         chrome.storage.local.set({
             em: emInput.value,
@@ -600,15 +735,24 @@ document.addEventListener('DOMContentLoaded', () => {
     async function runUpdate() {
         const emRaw = emInput.value;
         const objRaw = objInput.value;
+        const activeTab = getActiveTabId();
 
-        const emMode = classifyEMInput(emRaw);
-        const emKeys = (emMode === 'eme') ? new Set() : getEMKeys(emRaw);
+        const det = parseDetectorRequest(emRaw);
+        const detFields = det ? extractDetectorHashes(det.params, det.profile) : null;
+
         const parsedObj = parseObj(objRaw);
         const objKeys = parsedObj ? collectObjKeys(parsedObj) : new Set();
+        const emMode = det ? null : classifyEMInput(emRaw);
+        const emKeys = (det || emMode === 'eme') ? new Set() : getEMKeys(emRaw);
 
-        const tabKeys = getActiveTabId() === 'tab-obj' ? objKeys : emKeys;
-        renderVerifyFields(tabKeys);
+        // Verify fields follow the active view: obj tokens, detector fields, or em tokens.
+        let verifyIds;
+        if (activeTab === 'tab-obj') verifyIds = tokensToVerifyIds(objKeys);
+        else if (det) verifyIds = new Set(detFields.filter(f => f.verifyId).map(f => f.verifyId));
+        else verifyIds = tokensToVerifyIds(emKeys);
+        renderVerifyFieldsByIds(verifyIds);
 
+        // Google compare hashes (consumed by renderEM / renderObj).
         const hashes = {};
         await Promise.all(verifyFields.map(async f => {
             const val = verifyState[f.id];
@@ -622,7 +766,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }));
 
         renderObj(parsedObj, objRaw, hashes, objKeys);
-        renderEM(emRaw, hashes, emKeys);
+        if (det) await renderDetectorValidation(det, detFields);
+        else renderEM(emRaw, hashes, emKeys);
 
         persist();
     }
@@ -935,10 +1080,66 @@ document.addEventListener('DOMContentLoaded', () => {
         return '';
     }
 
+    // A capture carries user data if it has a Google identifier (em/eme/
+    // user_data) OR — for third-party detectors like Meta — at least one parsed
+    // identifier field. Used by the "only requests with user data" filter and
+    // the card dimming so Meta captures are treated on equal footing.
+    function captureHasUserData(c) {
+        return !!(c.em || c.eme || c.userData || (c.identifiers && c.identifiers.length > 0));
+    }
+
+    // Detector bucket → pill class + label. Buckets mirror detectors.js so a
+    // Meta field lands in the same visual vocabulary as the Google identifiers.
+    const DETECTOR_BUCKET_PILL = {
+        email:      { cls: 'identifier-em',   label: 'Email' },
+        phone:      { cls: 'identifier-pn',   label: 'Phone' },
+        firstName:  { cls: 'identifier-name', label: 'First name' },
+        lastName:   { cls: 'identifier-name', label: 'Last name' },
+        city:       { cls: 'identifier-addr', label: 'City' },
+        region:     { cls: 'identifier-addr', label: 'State' },
+        postal:     { cls: 'identifier-addr', label: 'Zip' },
+        country:    { cls: 'identifier-addr', label: 'Country' },
+        externalId: { cls: 'source-userdata', label: 'External ID' },
+        gender:     { cls: 'source-userdata', label: 'Gender' },
+        dob:        { cls: 'source-userdata', label: 'Date of birth' }
+    };
+
+    // Render one pill per detector identifier field. Three states:
+    //   plaintext → red "raw" warning (known PII field sent unhashed = a leak)
+    //   hashed    → normal identifier pill (SHA-256, as expected)
+    //   masked    → neutral pill (only a cud/ncud mask was transmitted)
+    function renderDetectorPills(identifiers) {
+        if (!identifiers || identifiers.length === 0) {
+            return '<span class="cap-pill none" title="Event without advanced-matching fields">no user data</span>';
+        }
+        return identifiers.map(f => {
+            const def = DETECTOR_BUCKET_PILL[f.bucket] || { cls: '', label: f.label || f.field };
+            const fld = escapeHtml(f.field);
+            if (f.plaintext) {
+                return `<span class="cap-pill pii-raw" title="${escapeHtml(def.label)} sent UNHASHED — plaintext PII leaving the browser">${fld} ⚠ raw</span>`;
+            }
+            if (f.hashed) {
+                return `<span class="cap-pill ${def.cls}" title="${escapeHtml(def.label)} — SHA-256 hashed">${fld}</span>`;
+            }
+            return `<span class="cap-pill pii-masked" title="${escapeHtml(def.label)} — masked value only, no raw data sent">${fld} masked</span>`;
+        }).join('');
+    }
+
+    // Event summary line for a detector capture (mirrors renderConversionLine's
+    // slot on the card).
+    function renderDetectorEventLine(c) {
+        const segs = [];
+        if (c.event)      segs.push(`<span class="conv-evt">${escapeHtml(c.event)}</span>`);
+        if (c.providerId) segs.push(`<span title="Pixel ID">id ${escapeHtml(c.providerId)}</span>`);
+        if (c.detectorConsent && c.detectorConsent.ldu) segs.push('<span title="Limited Data Use active">LDU</span>');
+        if (segs.length === 0) return '';
+        return `<div class="cap-card-conv">${segs.join('<span class="conv-sep">·</span>')}</div>`;
+    }
+
     function renderCaptures() {
         recCount.textContent = captures.length;
         const visible = captures.filter(c => {
-            if (filterEmOnly && !c.em && !c.eme && !c.userData) return false;
+            if (filterEmOnly && !captureHasUserData(c)) return false;
             if (!filterIncludeGa && (c.source || 'ads') === 'ga') return false;
             return true;
         });
@@ -959,9 +1160,14 @@ document.addEventListener('DOMContentLoaded', () => {
         capEmpty.hidden = true;
         capList.innerHTML = visible.slice().reverse().map(c => {
             const realIdx = captures.indexOf(c);
-            const hasIdentifier = !!(c.em || c.eme || c.userData);
+            const isDetector = !!c.provider;
+            const hasIdentifier = captureHasUserData(c);
             const transport = c.transport || 'google';
             const source = c.source || 'ads';
+            const pills = isDetector
+                ? renderDetectorPills(c.identifiers)
+                : `${customLoaderPill(c)}${renderPills(c.em, c.eme, c.userData)}${consentMarkerPill(c.consent)}`;
+            const convLine = isDetector ? renderDetectorEventLine(c) : renderConversionLine(c.conversion);
             return `<div class="cap-card ${hasIdentifier ? '' : 'no-em'} source-${source} transport-${transport}" data-idx="${realIdx}">
                 <button class="cap-detail-btn" data-detail-idx="${realIdx}" aria-label="Show details" title="Show details — tip: Ctrl/⌘+click anywhere on the card opens this too">i</button>
                 <div class="cap-card-head">
@@ -969,8 +1175,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     <span class="cap-method">${c.method}</span>
                     <span class="cap-host">${shortenUrl(c.url, c.host)}</span>
                 </div>
-                <div class="cap-card-pills">${customLoaderPill(c)}${renderPills(c.em, c.eme, c.userData)}${consentMarkerPill(c.consent)}</div>
-                ${renderConversionLine(c.conversion)}
+                <div class="cap-card-pills">${pills}</div>
+                ${convLine}
             </div>`;
         }).join('');
         capList.querySelectorAll('.cap-card').forEach(card => {
@@ -980,6 +1186,22 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (!cap) return;
                 if (e.ctrlKey || e.metaKey) {
                     openDetail(cap);
+                    return;
+                }
+                if (cap.provider) {
+                    // Detector capture (Meta etc.): load its request string into
+                    // the em field and let runUpdate render the validation below —
+                    // same place as the Google em result.
+                    const d = (typeof EcDetectors !== 'undefined') ? EcDetectors.byId(cap.provider) : null;
+                    if (d && d.validation) {
+                        emInput.value = detectorRequestString(cap, d.validation);
+                        activateTab('tab-em');
+                        chrome.storage.local.set({ activeTab: 'tab-em' });
+                        runUpdate();
+                        emInput.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                    } else {
+                        openDetail(cap);
+                    }
                     return;
                 }
                 if (cap.em || cap.eme) {
@@ -1168,7 +1390,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const recExport = document.getElementById('recExport');
     recExport.addEventListener('click', async () => {
-        const exportSet = filterEmOnly ? captures.filter(c => !!(c.em || c.eme || c.userData)) : captures;
+        const exportSet = filterEmOnly ? captures.filter(captureHasUserData) : captures;
         if (exportSet.length === 0) {
             showError('Nothing to export.');
             setTimeout(() => showError(''), 2000);
@@ -1189,6 +1411,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 userData: c.userData || null,
                 conversion: c.conversion || null,
                 consent: c.consent || null,
+                provider: c.provider || null,
+                event: c.event || null,
+                identifiers: c.identifiers || null,
                 source: c.source || 'ads',
                 transport: c.transport || 'google'
             }))
@@ -1266,6 +1491,50 @@ document.addEventListener('DOMContentLoaded', () => {
         chrome.storage.local.set({ recUdIndicator: v });
         chrome.runtime.sendMessage({ type: 'setIndicator', enabled: v });
     });
+
+    // ---------- Third-party detectors (Meta, …) ----------
+    // Each detector's host permission lives only while its toggle is on:
+    // enabling requests it (from the checkbox's user gesture), disabling
+    // revokes it. The enabledDetectors flag drives parsing in the SW; the
+    // permission drives which requests the webRequest listener even sees.
+    const svcMeta = document.getElementById('svcMeta');
+    const META_ORIGINS = ['https://*.facebook.com/*'];
+    let enabledDetectors = {};
+
+    function setDetectorFlag(id, on) {
+        enabledDetectors = Object.assign({}, enabledDetectors, { [id]: on });
+        chrome.storage.local.set({ enabledDetectors });
+    }
+
+    if (svcMeta) {
+        svcMeta.addEventListener('change', async () => {
+            if (svcMeta.checked) {
+                let granted = false;
+                try {
+                    granted = await chrome.permissions.request({ origins: META_ORIGINS });
+                } catch (e) {
+                    showError('Permission request failed: ' + e.message);
+                }
+                if (!granted) { svcMeta.checked = false; return; }
+                setDetectorFlag('meta', true);
+            } else {
+                setDetectorFlag('meta', false);
+                try { await chrome.permissions.remove({ origins: META_ORIGINS }); } catch (e) { /* ignore */ }
+            }
+        });
+
+        // Load persisted flag, reconciled with the actual permission — if the
+        // user revoked facebook.com access via Chrome settings, the toggle
+        // reflects "off" even though the flag was still stored as on.
+        chrome.storage.local.get('enabledDetectors', async (res) => {
+            enabledDetectors = (res.enabledDetectors && typeof res.enabledDetectors === 'object') ? res.enabledDetectors : {};
+            let has = false;
+            try { has = await chrome.permissions.contains({ origins: META_ORIGINS }); } catch (e) { /* ignore */ }
+            const on = !!enabledDetectors.meta && has;
+            if (!!enabledDetectors.meta !== on) setDetectorFlag('meta', on);
+            svcMeta.checked = on;
+        });
+    }
 
     chrome.runtime.sendMessage({ type: 'getState' }, (res) => {
         if (!res) return;

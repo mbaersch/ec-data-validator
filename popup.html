@@ -180,6 +180,15 @@
     .cap-pill.loader-custom { background: #e0e7ff; color: #3730a3; font-weight: 700; }
     .cap-pill.consent-denied { background: #fee2e2; color: #991b1b; }
     .cap-pill.consent-unset  { background: #ffedd5; color: #9a3412; }
+    .cap-pill.pii-raw    { background: #fee2e2; color: #991b1b; }
+    .cap-pill.pii-masked { background: #f1f5f9; color: #64748b; }
+    .cap-pill.meta-event { background: #e7f0fe; color: #1877f2; }
+    .cap-card.source-meta { border-left: 3px solid #1877f2; padding-left: 8px; }
+
+    /* Detector validation renders in the em result area (same place as the
+       Google em result). */
+    .meta-head { display: inline-block; margin-bottom: 10px; font-size: 10px; padding: 3px 8px; border-radius: 4px; background: #e7f0fe; color: #1877f2; font-weight: 600; letter-spacing: 0.3px; }
+    .meta-note { font-size: 11px; color: var(--text-muted); margin: 0 0 10px; line-height: 1.45; }
     .cap-card-conv { font-family: 'Fira Code', 'Consolas', monospace; font-size: 10px; color: var(--text-strong); margin-top: 6px; line-height: 1.5; word-break: break-word; }
     .cap-card-conv .conv-sep { color: var(--text-fainter); margin: 0 4px; }
     .cap-card-conv .conv-evt { color: var(--primary); font-weight: 700; text-transform: uppercase; font-size: 9px; letter-spacing: 0.3px; }
@@ -235,21 +244,22 @@
 <body>
 
 <div class="tabs">
-  <div class="tab active" data-target="tab-em">EM Decoder</div>
+  <div class="tab active" data-target="tab-em">PII Decoder</div>
   <div class="tab" data-target="tab-obj">Object Analysis</div>
   <div class="tab tab-icon" data-target="tab-settings" title="Settings" aria-label="Settings">⚙</div>
 </div>
 
 <div id="tab-em" class="content active">
   <div class="intro">
-    <p>Decode and validate the <code>em</code> parameter from a Google Ads conversion request.</p>
+    <p>Decode and validate hashed user data (PII) from requests to Google Ads, GA4, Meta or other marketing platforms.</p>
     <details>
       <summary>Show more</summary>
       <ul>
-        <li>Paste the full <code>em=…</code> value from Google Tag Assistant or the Network tab (with or without the <code>em=</code> prefix). Format: <code>tv.1~em.HASH~pn.HASH~…</code></li>
+        <li>Paste a Google <code>em=…</code> value from Tag Assistant or the Network tab (with or without the <code>em=</code> prefix). Format: <code>tv.1~em.HASH~pn.HASH~…</code></li>
         <li>Tokens: <code>em</code> email, <code>pn</code> phone, <code>fn0</code>/<code>ln0</code> first/last name, <code>sa0</code> street, <code>ct0</code>/<code>rg0</code>/<code>pc0</code>/<code>co0</code> city/region/postal&nbsp;code/country.</li>
+        <li>Or click a captured request below — Google requests load their <code>em</code> value, Meta and other detector requests load their advanced-matching fields, each validated with that provider's own hashing rules.</li>
         <li>The <strong>HEX</strong>/<strong>B64URL</strong> pill marks the hash encoding — auto-detection sends Base64URL, manually provided <code>sha256_*</code> values are Hex.</li>
-        <li>Fill the optional "verify fields" below with plaintext — values are hashed in both encodings and matched against each token (<code>MATCH</code>/<code>ERR</code>).</li>
+        <li>Fill the optional "verify fields" below with plaintext — values are hashed and matched against each token (<code>MATCH</code>/<code>ERR</code>).</li>
       </ul>
     </details>
   </div>
@@ -278,7 +288,7 @@
 
   <div class="input-group">
     <div class="input-label-row">
-      <label for="emInput">"em" Parameter Value</label>
+      <label for="emInput">PII Parameters</label>
       <button type="button" class="input-clear" data-target="emInput">clear</button>
     </div>
     <textarea id="emInput" placeholder="tv.1~em.hash~pn.hash..."></textarea>
@@ -364,6 +374,19 @@
   </div>
 
   <div class="settings-section">
+    <div class="settings-section-title">Additional services (PII detection)</div>
+    <div class="settings-list">
+      <label class="settings-item">
+        <input type="checkbox" id="svcMeta">
+        <div class="settings-text">
+          <div class="settings-label">Meta Pixel</div>
+          <div class="settings-desc">Detect user data in Meta Pixel requests (<code>facebook.com/tr</code>). Enabling asks for permission to read <code>facebook.com</code> requests; disabling revokes it again. Advanced-matching fields (<code>em</code>, <code>ph</code>, …) are normally SHA-256 hashed by <code>fbevents.js</code> — a known field arriving unhashed is flagged as a <strong>plaintext leak</strong>.</div>
+        </div>
+      </label>
+    </div>
+  </div>
+
+  <div class="settings-section">
     <div class="settings-section-title">Appearance</div>
     <div class="settings-list">
       <div class="settings-radio">
@@ -427,6 +450,7 @@
   </div>
 </div>
 
+<script src="detectors.js"></script>
 <script src="popup.js"></script>
 </body>
 </html>
