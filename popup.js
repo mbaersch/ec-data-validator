@@ -91,11 +91,18 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Phone: alle Nicht-Ziffern entfernen, fuehrendes "+" beibehalten.
-    // Default-Hash (Google Ads): MIT "+". Zusaetzlich Meta-Variante OHNE "+".
+    // Default-Hash (Google Ads): E.164 MIT "+". Zusaetzlich Meta-Variante OHNE
+    // "+" (siehe metaAlt). Ein internationaler "00"-Praefix (z. B. 004912345)
+    // ist gleichbedeutend mit "+" und wird zu E.164 normalisiert — sonst matcht
+    // der getippte Vergleichswert weder das Google- (+49…) noch das Meta-Format
+    // (49…). Eine national geschriebene Nummer ohne Laendercode (0170…) ist
+    // ohnehin nicht matchbar und wird bewusst nicht "repariert".
     function normalizePhone(v) {
         const cleaned = v.replace(/[^\d+]/g, '');
         if (cleaned.startsWith('+')) return '+' + cleaned.slice(1).replace(/\+/g, '');
-        return cleaned.replace(/\+/g, '');
+        const digits = cleaned.replace(/\+/g, '');
+        if (digits.startsWith('00')) return '+' + digits.slice(2);
+        return digits;
     }
 
     // Street: alle Nicht-Buchstaben (ausser Whitespace) verwerfen, dann lower
@@ -218,23 +225,58 @@ document.addEventListener('DOMContentLoaded', () => {
             || observed === expected.b64url;
     }
 
-    // Phone-spezifisch: 'match' (Google Ads-konform mit "+"), 'meta-only'
-    // (passt nur ohne fuehrendes "+", also Meta-Format), oder 'mismatch'.
-    function evalMatch(observed, expected) {
-        if (!expected) return 'mismatch';
-        if (hashMatches(observed, expected)) return 'match';
-        if (expected.metaAlt && hashMatches(observed, expected.metaAlt)) return 'meta-only';
-        return 'mismatch';
+    // The "raw" (un-normalized) form of a comparison value: strip only the
+    // formatting a naive template would drop, but WITHOUT the provider's field
+    // normalization. Lets us tell a canonical match from a value that was hashed
+    // un-normalized. sha256() additionally lower/trims — the minimum any template
+    // does — so this stays a faithful "raw" baseline.
+    function rawInputFor(verifyId, val) {
+        if (verifyId === 'v_phone') return String(val).replace(/[^\d+]/g, '');
+        return String(val);
+    }
+
+    // Classify an observed hash against a field's expected candidates, in
+    // priority order:
+    //   norm    — the value under this provider's correct normalization
+    //   metaAlt — Google phone hashed without the leading '+' (Meta CAPI format)
+    //   raw     — the value hashed WITHOUT normalization; present only when it
+    //             differs from norm → the sent value can't match on the platform
+    //             side, which normalizes before matching.
+    // Returns { kind: 'none'|'mismatch'|'match', variant, normalizedInput }.
+    function classifyMatch(observed, expected) {
+        if (!expected) return { kind: 'none' };
+        if (hashMatches(observed, expected)) {
+            // Correct normalized value matched. If a differing raw form also
+            // existed, the entry was looser (e.g. 0049… vs +49…) and had to be
+            // normalized to match — the SENT value is canonical.
+            return { kind: 'match', variant: 'norm', normalizedInput: !!expected.raw };
+        }
+        if (expected.metaAlt && hashMatches(observed, expected.metaAlt)) {
+            return { kind: 'match', variant: 'meta' };
+        }
+        if (expected.raw && hashMatches(observed, expected.raw)) {
+            return { kind: 'match', variant: 'raw' };
+        }
+        return { kind: 'mismatch' };
     }
 
     function renderMatchStatus(observed, expected) {
-        const kind = evalMatch(observed, expected);
-        if (kind === 'match') return '<span class="match">MATCH</span>';
-        if (kind === 'meta-only') {
+        const r = classifyMatch(observed, expected);
+        if (r.kind === 'none') return '';
+        if (r.kind === 'mismatch') return '<span class="no-match">ERR</span>';
+        if (r.variant === 'meta') {
             const tip = "Hash matched only without leading '+' — Meta CAPI format, not E.164-compliant for Google Ads.";
             return `<span class="match">MATCH</span><span class="fmt-warn" title="${tip}">META ONLY · NO '+'</span>`;
         }
-        return '<span class="no-match">ERR</span>';
+        if (r.variant === 'raw') {
+            const tip = 'Hash matches the value exactly as entered, NOT its normalized form. It was hashed un-normalized (manually or by a template) and will NOT match on the ad-platform side, which normalizes before matching.';
+            return `<span class="match">MATCH</span><span class="fmt-warn" title="${tip}">RAW · NOT NORMALIZED</span>`;
+        }
+        if (r.normalizedInput) {
+            const tip = 'Match after normalizing your input (e.g. 004912345 → 4912345 / +49…). The sent value is correctly normalized; your entry just used a looser format.';
+            return `<span class="match">MATCH</span><span class="fmt-note" title="${tip}">INPUT NORMALIZED</span>`;
+        }
+        return '<span class="match">MATCH</span>';
     }
 
     function encPill(enc) {
@@ -695,7 +737,17 @@ document.addEventListener('DOMContentLoaded', () => {
         const cmp = {};
         await Promise.all(fields
             .filter(f => f.verifyId && f.normalize && verifyState[f.verifyId])
-            .map(async f => { cmp[f.verifyId] = await sha256(f.normalize(verifyState[f.verifyId])); }));
+            .map(async f => {
+                const val = verifyState[f.verifyId];
+                const normalized = f.normalize(val);
+                const exp = await sha256(normalized);
+                if (!exp) return;
+                const rawVal = rawInputFor(f.verifyId, val);
+                if (rawVal && rawVal.toLowerCase().trim() !== normalized.toLowerCase().trim()) {
+                    exp.raw = await sha256(rawVal);
+                }
+                cmp[f.verifyId] = exp;
+            }));
 
         const evName = det.event ? ' · ' + escapeHtml(det.event) : '';
         const note = det.profile.note ? ` (${escapeHtml(det.profile.note)})` : '';
@@ -711,9 +763,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const enc = detectHashEncoding(f.value);
             let status = '';
             if (f.verifyId && cmp[f.verifyId]) {
-                status = hashMatches(f.value, cmp[f.verifyId])
-                    ? '<span class="match">MATCH</span>'
-                    : '<span class="no-match">ERR</span>';
+                status = renderMatchStatus(f.value, cmp[f.verifyId]);
             }
             status += encPill(enc);
             const statusBlock = status.trim() ? `<div class="status-line">${status}</div>` : '';
@@ -759,8 +809,14 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!val) return;
             const normalized = f.normalize ? f.normalize(val) : val;
             const h = await sha256(normalized);
+            if (!h) return;
             if (f.id === 'v_phone' && normalized.startsWith('+')) {
                 h.metaAlt = await sha256(normalized.slice(1));
+            }
+            // Un-normalized ("raw") candidate for the not-normalized diagnostic.
+            const rawVal = rawInputFor(f.id, val);
+            if (rawVal && rawVal.toLowerCase().trim() !== normalized.toLowerCase().trim()) {
+                h.raw = await sha256(rawVal);
             }
             hashes[f.id] = h;
         }));
