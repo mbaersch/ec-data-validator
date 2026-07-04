@@ -2,14 +2,18 @@ const { chromium } = require('@playwright/test');
 const path = require('path');
 const fs = require('fs');
 const fixtures = require('../tests/fixtures.js');
+const { CAPTURES } = require('../tests/detector-fixtures.js');
 
 const MERCH_URL = 'https://shop.googlemerchandisestore.com/';
 const VIEW_W = 1280;
 const VIEW_H = 800;
 
 // Chrome Side Panel: rechte Spalte, volle Höhe, kein Drop-Shadow / Border-Radius.
-const PANEL_W = 420;
-const BG_W = VIEW_W - PANEL_W; // 860 — page content width left of the side panel
+// The panel is the product — give it the majority of the frame (was 420 / 33%,
+// which left the store page dominating). A wide side panel is realistic (users
+// drag it), and the store now reads as a context slice on the left.
+const PANEL_W = 720;
+const BG_W = VIEW_W - PANEL_W; // 560 — store slice left of the side panel
 
 const SHORT_ECID = `tv.1~em.${fixtures.HASHES.emailGmail.hex}~pn.${fixtures.HASHES.phoneE164.hex}`;
 
@@ -228,10 +232,71 @@ async function generateStoreScreenshots() {
     await page.close();
   }
 
-  // 01: Object Analysis with full user_data + verification
-  await snap('01-validation.png', {
+  // Clear any decoder input the panel restored from a previous scene's storage.
+  const clearDecoder = async (p) => {
+    await p.evaluate(() => {
+      for (const id of ['emInput', 'objInput']) {
+        const el = document.getElementById(id);
+        if (el) { el.value = ''; el.dispatchEvent(new Event('input', { bubbles: true })); }
+      }
+    });
+  };
+  const hideIntro = async (p) => {
+    await p.evaluate(() => {
+      const intro = document.querySelector('#tab-em .intro');
+      if (intro) intro.style.display = 'none';
+    });
+  };
+
+  // 01: PII-leak detection across ad platforms — the flagship. Meta / TikTok /
+  // Pinterest / Bing / LinkedIn cards, including an unhashed-email leak.
+  await snap('01-pii-leak-detection.png', {
+    tabTarget: 'tab-em',
+    mockCaptures: CAPTURES,
+    mockRecording: true,
+    setupFn: async (p) => {
+      await clearDecoder(p);
+      await hideIntro(p);
+      await p.evaluate(() => {
+        const url = document.getElementById('recUrl');
+        if (url) url.value = 'https://www.example-shop.com/*';
+      });
+      await p.waitForSelector('.cap-card.source-meta');
+      await p.evaluate(() => {
+        const cap = document.getElementById('capList');
+        if (cap && !cap.hidden) cap.scrollIntoView({ block: 'start' });
+      });
+      await p.waitForTimeout(400);
+    }
+  });
+
+  // 02: Hash validation with the normalization diagnostic — click a detector
+  // card, enter a looser plaintext → MATCH + "INPUT NORMALIZED".
+  await snap('02-hash-validation.png', {
+    tabTarget: 'tab-em',
+    mockCaptures: CAPTURES,
+    mockRecording: true,
+    setupFn: async (p) => {
+      await hideIntro(p);
+      await p.waitForSelector('.cap-card.source-pinterest');
+      await p.click('.cap-card.source-pinterest');
+      await p.waitForSelector('#v_email', { state: 'visible' });
+      await p.fill('#v_email', 'MAIL@markus-baersch.de');
+      await p.dispatchEvent('#v_email', 'input');
+      await p.waitForTimeout(400);
+      await p.evaluate(() => {
+        const em = document.getElementById('emResult');
+        if (em) em.scrollIntoView({ block: 'start' });
+      });
+      await p.waitForTimeout(200);
+    }
+  });
+
+  // 03: Object Analysis with full user_data + verification (Google EC).
+  await snap('03-object-analysis.png', {
     tabTarget: 'tab-obj',
     setupFn: async (p) => {
+      await clearDecoder(p);
       await p.fill('#objInput', fixtures.USER_DATA_FULL_JS);
       await p.dispatchEvent('#objInput', 'input');
       await p.waitForTimeout(400);
@@ -247,8 +312,8 @@ async function generateStoreScreenshots() {
     }
   });
 
-  // 02: EM Decoder with ECID (hex) + verification
-  await snap('02-em-decoder.png', {
+  // 04: EM Decoder with ECID (hex) + verification.
+  await snap('04-em-decoder.png', {
     tabTarget: 'tab-em',
     setupFn: async (p) => {
       await p.fill('#emInput', fixtures.ECID_STRING_HEX);
@@ -266,34 +331,18 @@ async function generateStoreScreenshots() {
     }
   });
 
-  // 03: EME Decoder (encrypted Cloud-Edge token)
-  await snap('03-eme-decoder.png', {
-    tabTarget: 'tab-em',
-    setupFn: async (p) => {
-      await p.fill('#emInput', fixtures.EME_TOKEN_WITH_PREFIX);
-      await p.dispatchEvent('#emInput', 'input');
-      await p.waitForTimeout(400);
-    }
-  });
-
-  // 04: Recording with simulated Tag Gateway / sGTM + Google captures
-  await snap('04-recording.png', {
+  // 05: Live recording — Google Ads / GA4 / Tag Gateway / sGTM captures.
+  await snap('05-recording.png', {
     tabTarget: 'tab-em',
     mockCaptures: buildFixtureCaptures(),
     mockRecording: true,
     setupFn: async (p) => {
+      await clearDecoder(p);
+      await hideIntro(p);
       await p.evaluate(() => {
-        const em = document.getElementById('emInput');
-        if (em) {
-          em.value = '';
-          em.dispatchEvent(new Event('input', { bubbles: true }));
-        }
         const url = document.getElementById('recUrl');
         if (url) url.value = 'https://www.example-shop.com/*';
-        const intro = document.querySelector('#tab-em .intro');
-        if (intro) intro.style.display = 'none';
       });
-      // Scroll the side panel content so the recording card + captures are aligned at top.
       await p.evaluate(() => {
         const cap = document.getElementById('capList');
         if (cap && !cap.hidden) cap.scrollIntoView({ block: 'nearest' });
