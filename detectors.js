@@ -23,13 +23,22 @@
   // Field normalizers used by the validation profiles. Each provider hashes
   // its advanced-matching fields with its own normalization; a validator must
   // reproduce it exactly to compare. These are the building blocks — providers
-  // pick per field. (Meta's address rules are approximations here and can be
-  // sharpened against real payloads.)
-  function normTrimLower(v)    { return String(v).trim().toLowerCase(); }
-  function normDigitsOnly(v)   { return String(v).replace(/[^\d]/g, ''); }               // phone: digits, country code, no +
-  function normLettersLower(v) { return String(v).toLowerCase().replace(/[^\p{L}]/gu, ''); } // city/state: letters only, lowercased
-  function normZip(v)          { return String(v).trim().toLowerCase().replace(/\s/g, ''); }
-  function normCountry(v)      { return String(v).trim().toLowerCase(); }                // ISO-3166-1 alpha-2
+  // pick per field. The Meta rules below match fbevents.js' in-browser
+  // normalization and Meta's documented advanced-matching / customer-information
+  // rules (developers.facebook.com/docs/.../customer-information-parameters).
+  function normTrimLower(v)    { return String(v).trim().toLowerCase(); }                 // email: lowercase + trim
+  // phone: digits only (incl. country code), then strip leading zeros —
+  // fbevents does .replace(/[^0-9]/g,'').replace(/^0+/,''); e.g. a German
+  // "0170 1234567" hashes as "1701234567", not "01701234567".
+  function normPhone(v)        { return String(v).replace(/[^\d]/g, '').replace(/^0+/, ''); }
+  // name/city/state: lowercase, drop punctuation, spaces and digits, keep
+  // (UTF-8) letters — so accents survive but "O'Brien" → "obrien".
+  function normLettersLower(v) { return String(v).toLowerCase().replace(/[^\p{L}]/gu, ''); }
+  // zip: lowercase, no spaces and no dash (keeps UK alphanumeric postcodes);
+  // Meta additionally truncates US codes to the first 5 digits, which we can't
+  // do reliably without a country signal, so we leave zip+4 length as-is.
+  function normZip(v)          { return String(v).trim().toLowerCase().replace(/[^a-z0-9]/g, ''); }
+  function normCountry(v)      { return String(v).trim().toLowerCase(); }                 // ISO-3166-1 alpha-2
 
   // -------------------------------------------------------------------------
   // Meta (Facebook) Pixel
@@ -146,15 +155,15 @@
     // means adding one of these, not new UI.
     validation: {
       title: 'Meta Pixel',
-      note: 'email lower/trim · phone digits, no "+" · address letters/lower',
+      note: 'email lower/trim · phone digits, no leading 0 · name/city letters only · zip no space/dash · country 2-letter',
       eventParam: 'ev', // request key carrying the event name (for the header)
       // request keys carrying a validatable hash (the hashed representations)
       hashSlotRe: /^(ud|udff|aud)\[([\w]+)\]$/,
       fields: {
         em:      { verifyId: 'v_email',   label: 'Email',      normalize: normTrimLower },
-        ph:      { verifyId: 'v_phone',   label: 'Phone',      normalize: normDigitsOnly },
-        fn:      { verifyId: 'v_fn',      label: 'First name', normalize: normTrimLower },
-        ln:      { verifyId: 'v_ln',      label: 'Last name',  normalize: normTrimLower },
+        ph:      { verifyId: 'v_phone',   label: 'Phone',      normalize: normPhone },
+        fn:      { verifyId: 'v_fn',      label: 'First name', normalize: normLettersLower },
+        ln:      { verifyId: 'v_ln',      label: 'Last name',  normalize: normLettersLower },
         ct:      { verifyId: 'v_city',    label: 'City',       normalize: normLettersLower },
         st:      { verifyId: 'v_region',  label: 'State',      normalize: normLettersLower },
         zp:      { verifyId: 'v_postal',  label: 'Zip',        normalize: normZip },
