@@ -1295,6 +1295,10 @@ document.addEventListener('DOMContentLoaded', () => {
     function renderDetectorEventLine(c) {
         const segs = [];
         if (c.event)      segs.push(`<span class="conv-evt">${escapeHtml(c.event)}</span>`);
+        if (c.detectorRevenue && c.detectorRevenue.value != null && c.detectorRevenue.value !== '') {
+            const cur = c.detectorRevenue.currency ? ' ' + escapeHtml(c.detectorRevenue.currency) : '';
+            segs.push(`<span class="conv-val" title="Conversion value">${escapeHtml(String(c.detectorRevenue.value))}${cur}</span>`);
+        }
         if (c.providerId) segs.push(`<span title="Pixel ID">id ${escapeHtml(c.providerId)}</span>`);
         if (c.detectorConsent && c.detectorConsent.ldu) segs.push('<span title="Limited Data Use active">LDU</span>');
         if (segs.length === 0) return '';

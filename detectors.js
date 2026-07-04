@@ -595,7 +595,23 @@
       if (!ti) return null; // a UET hit always carries its tag id
 
       const evt = get('evt');
+      const ea = get('ea'), ec = get('ec'), el = get('el');
       const pidRaw = get('pid');
+
+      // Friendly event name: a custom event's real action lives in ea (purchase,
+      // refund, add_to_cart, …). Fall back to the ecommerce pagetype — every
+      // e-commerce hit carries ecom params (pagetype / ecomm_totalvalue), which
+      // makes it recognisable even when ea is absent — then to el, then custom.
+      let eventName;
+      if (evt === 'custom') eventName = [ec, ea].filter(Boolean).join(' – ') || get('pagetype') || el || 'custom';
+      else eventName = evt != null && evt !== '' ? String(evt) : null;
+
+      // Revenue: gv (goal value) or ecomm_totalvalue; currency from gc / currency.
+      const rawVal = get('gv') != null ? get('gv') : get('ecomm_totalvalue');
+      const cur = get('gc') || get('currency') || null;
+      const revenue = (rawVal != null && rawVal !== '')
+        ? { value: String(rawVal), currency: cur ? String(cur) : null }
+        : null;
 
       const identifiers = [];
       const hashParams = {};
@@ -621,11 +637,12 @@
       return {
         provider: 'bing',
         transport: 'standard',
-        event: evt != null && evt !== '' ? String(evt) : null,
+        event: eventName,
         standardEvent: false,
         providerId: String(ti),
         identifiers,
         consent: null,
+        revenue,
         hashParams,
       };
     },

@@ -621,6 +621,7 @@ async function handleDetectorRequest(detector, details, host, pathname) {
     providerId: parsed.providerId || null,
     identifiers: parsed.identifiers || [],
     detectorConsent: parsed.consent || null,
+    detectorRevenue: parsed.revenue || null,   // { value, currency } for e-commerce events
     // Flat hash slots (e.g. TikTok's nested context.user flattened to
     // user[email]=<hash>). Kept in its own field — enforceCap only stubs
     // query/bodyParams, so these small validatable slots survive truncation of
