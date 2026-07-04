@@ -74,6 +74,21 @@
     return new TextDecoder('utf-8').decode(bytes);
   }
 
+  // base64 text → raw bytes, and gzip bytes → text (async, via DecompressionStream
+  // — available in both the service worker and the panel). Used for LinkedIn's
+  // base64(gzip(JSON)) /wa/ body.
+  function base64ToBytes(b64) {
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return bytes;
+  }
+  async function gunzipToText(bytes) {
+    const stream = new Response(bytes).body.pipeThrough(new DecompressionStream('gzip'));
+    const buf = await new Response(stream).arrayBuffer();
+    return new TextDecoder('utf-8').decode(buf);
+  }
+
   // -------------------------------------------------------------------------
   // Meta (Facebook) Pixel
   // -------------------------------------------------------------------------
@@ -617,10 +632,84 @@
   };
 
   // -------------------------------------------------------------------------
+  // LinkedIn Insight Tag (enhanced conversions)
+  // -------------------------------------------------------------------------
+  //
+  // The hashed email (hem) does NOT ride in the /collect beacon — it travels in a
+  // POST to px.ads.linkedin.com/wa/ whose body is base64(gzip(JSON)). We decode
+  // that (async, via DecompressionStream) and read `hem` — SHA-256 of the
+  // lower-cased email, same format as the others. Only /wa/ hits that actually
+  // carry a hem are captured; a plain PAGE_VISIT (hem null) is interaction
+  // telemetry, not PII.
+
+  function isLinkedInHost(host) {
+    return /(^|\.)ads\.linkedin\.com$/.test((host || '').toLowerCase());
+  }
+
+  const linkedinDetector = {
+    id: 'linkedin',
+    label: 'LinkedIn Insight Tag',
+    permissionOrigins: ['https://px.ads.linkedin.com/*', 'https://px4.ads.linkedin.com/*'],
+
+    match(host, pathname) {
+      return isLinkedInHost(host) && /\/wa(\/|$)/.test(pathname || '');
+    },
+
+    validation: {
+      title: 'LinkedIn Insight Tag',
+      note: 'email lower/trim → SHA-256 (hem)',
+      eventParam: 'event',
+      hashSlotRe: /^(li)\[([\w]+)\]$/,
+      fields: {
+        hem: { verifyId: 'v_email', label: 'Email', normalize: normTrimLower },
+      },
+      labels: {},
+    },
+
+    // async: the /wa/ body is base64(gzip(JSON)); ctx.rawBody carries the raw
+    // request bytes (the base64 text).
+    async parse(ctx) {
+      const bytes = ctx.rawBody;
+      if (!bytes) return null;
+      let json;
+      try {
+        const b64 = new TextDecoder('utf-8').decode(bytes).trim();
+        json = JSON.parse(await gunzipToText(base64ToBytes(b64)));
+      } catch (e) { return null; }
+      if (!json || typeof json !== 'object' || Array.isArray(json)) return null;
+
+      const hem = (typeof json.hem === 'string' && json.hem.trim() !== '') ? json.hem.trim() : null;
+      if (!hem) return null; // no PII in this /wa/ hit — skip
+
+      const pids = Array.isArray(json.pids) ? json.pids : [];
+      const signalType = json.signalType != null ? String(json.signalType) : null;
+      const hashed = looksHashedSha256(hem);
+
+      const identifiers = [{
+        field: 'hem', bucket: 'email', label: 'Email',
+        hashed, plaintext: !hashed, masked: false, mask: null,
+      }];
+      const hashParams = { 'li[hem]': hem };
+      if (signalType) hashParams.event = signalType;
+
+      return {
+        provider: 'linkedin',
+        transport: 'standard',
+        event: signalType,
+        standardEvent: false,
+        providerId: pids.length ? String(pids[0]) : null,
+        identifiers,
+        consent: null,
+        hashParams,
+      };
+    },
+  };
+
+  // -------------------------------------------------------------------------
   // Registry
   // -------------------------------------------------------------------------
 
-  const registry = [metaDetector, tiktokDetector, pinterestDetector, bingDetector];
+  const registry = [metaDetector, tiktokDetector, pinterestDetector, bingDetector, linkedinDetector];
 
   root.EcDetectors = {
     registry,

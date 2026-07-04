@@ -20,6 +20,7 @@
       --card-tiktok:  #fdf4ff;
       --card-pinterest: #fef2f2;
       --card-bing: #ecfdf6;
+      --card-linkedin: #e7f3fb;
       --text: #1e293b;
       --text-muted: #64748b;
       --text-faint: #94a3b8;
@@ -50,6 +51,7 @@
       --card-tiktok:  #241826;
       --card-pinterest: #2a1a1c;
       --card-bing: #16282a;
+      --card-linkedin: #16222e;
       --text: #e2e8f0;
       --text-muted: #94a3b8;
       --text-faint: #64748b;
@@ -200,6 +202,7 @@
     .cap-card.source-tiktok { border-left: 3px solid #ff0050; padding-left: 8px; background: var(--card-tiktok); }
     .cap-card.source-pinterest { border-left: 3px solid #e60023; padding-left: 8px; background: var(--card-pinterest); }
     .cap-card.source-bing { border-left: 3px solid #0a8a8a; padding-left: 8px; background: var(--card-bing); }
+    .cap-card.source-linkedin { border-left: 3px solid #0a66c2; padding-left: 8px; background: var(--card-linkedin); }
 
     /* Detector validation renders in the em result area (same place as the
        Google em result). */
@@ -418,6 +421,13 @@
         <div class="settings-text">
           <div class="settings-label">Bing UET</div>
           <div class="settings-desc">Detect user data in Microsoft Bing UET requests (<code>bat.bing.com/action</code>, <code>commerce.bing.com/cst</code>). Enabling asks for permission to read <code>bat.bing.com</code> / <code>commerce.bing.com</code> requests; disabling revokes it again. Enhanced-conversions fields ride in the <code>pid</code> parameter (<code>em</code>, <code>ph</code>, <code>fn</code>, <code>ln</code>), SHA-256 hashed — a known field arriving unhashed is flagged as a <strong>plaintext leak</strong>.</div>
+        </div>
+      </label>
+      <label class="settings-item">
+        <input type="checkbox" id="svcLinkedin">
+        <div class="settings-text">
+          <div class="settings-label">LinkedIn Insight Tag</div>
+          <div class="settings-desc">Detect the hashed email in LinkedIn enhanced-conversions requests (<code>px.ads.linkedin.com/wa</code>). Enabling asks for permission to read <code>*.ads.linkedin.com</code> requests; disabling revokes it again. The <code>hem</code> (SHA-256 email) rides in a gzip-compressed POST body, which the panel decodes and validates. Only hits that carry a <code>hem</code> are captured.</div>
         </div>
       </label>
     </div>

@@ -581,11 +581,28 @@ function clearAllBadges() {
 // separate from the Google path: the record carries `provider`/`identifiers`
 // instead of em/userData, and the Google-shaped fields stay null so the
 // existing capture rendering and indicator logic ignore it.
-function handleDetectorRequest(detector, details, host, pathname) {
+// Concatenate a request body's raw byte chunks into one ArrayBuffer, for
+// detectors that read the body directly (e.g. LinkedIn's gzip /wa/ POST).
+function rawRequestBytes(body) {
+  if (!body || !body.raw || !body.raw.length) return null;
+  const chunks = body.raw.filter(r => r && r.bytes).map(r => new Uint8Array(r.bytes));
+  if (!chunks.length) return null;
+  if (chunks.length === 1) return chunks[0].buffer;
+  const total = chunks.reduce((n, c) => n + c.length, 0);
+  const merged = new Uint8Array(total);
+  let off = 0;
+  for (const c of chunks) { merged.set(c, off); off += c.length; }
+  return merged.buffer;
+}
+
+// async: a detector's parse may be async (LinkedIn decompresses its body). We
+// don't block the request — the capture is just stored when parsing resolves.
+async function handleDetectorRequest(detector, details, host, pathname) {
   const { queryParams, bodyParams } = extractAllParams(details.url, details.requestBody);
+  const rawBody = rawRequestBytes(details.requestBody);
   let parsed;
   try {
-    parsed = detector.parse({ url: details.url, host, pathname, queryParams, bodyParams });
+    parsed = await detector.parse({ url: details.url, host, pathname, queryParams, bodyParams, rawBody });
   } catch (e) {
     console.error('[ec-validator] detector parse failed:', detector.id, e);
     return;
@@ -643,7 +660,10 @@ function handleRequest(details) {
   // recording; the always-on indicator stays Google-only.
   const detector = EcDetectors.match(host, pathname, enabledDetectors);
   if (detector) {
-    if (state.recording) handleDetectorRequest(detector, details, host, pathname);
+    if (state.recording) {
+      handleDetectorRequest(detector, details, host, pathname)
+        .catch(e => console.error('[ec-validator] detector error:', detector.id, e));
+    }
     return;
   }
 
