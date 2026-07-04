@@ -121,21 +121,37 @@
   // status leave this function, so the capture stays PII-free by itself.
   function extractMetaFields(queryParams, bodyParams) {
     const fields = {};
+    const ensure = (key, def) => fields[key] || (fields[key] = {
+      field: key, bucket: def.bucket, label: def.label,
+      hashed: false, plaintext: false, masked: false, mask: null,
+      // external_id is an opaque advertiser id, not PII — a pill in its own
+      // right, never a plaintext "leak" even when sent unhashed.
+      opaque: key === 'external_id',
+    });
     const consider = (params) => {
       for (const k of Object.keys(params || {})) {
+        // external_id can also ride in the custom-data namespace (cd[external_id])
+        // as a normal, often unhashed parameter — worth a pill of its own.
+        if (k === 'cd[external_id]') {
+          const cv = params[k];
+          if (cv != null && String(cv).trim() !== '') {
+            const f = ensure('external_id', META_FIELD.external_id);
+            if (looksHashedSha256(cv)) f.hashed = true;
+          }
+          continue;
+        }
         const m = META_UD_KEY_RE.exec(k);
         if (!m) continue;
         const rep = m[1], key = m[2];
         const def = META_FIELD[key];
         if (!def) continue; // unknown advanced-matching subfield
         const v = params[k];
-        const f = fields[key] || (fields[key] = {
-          field: key, bucket: def.bucket, label: def.label,
-          hashed: false, plaintext: false, masked: false, mask: null,
-        });
+        const f = ensure(key, def);
         if (rep === 'ud' || rep === 'udff' || rep === 'aud') {
           if (looksHashedSha256(v)) f.hashed = true;
-          else if (v != null && String(v).trim() !== '') f.plaintext = true;
+          // an unhashed value in a hash slot is a leak — except external_id,
+          // which legitimately travels unhashed (opaque flag already set).
+          else if (!f.opaque && v != null && String(v).trim() !== '') f.plaintext = true;
         } else if (rep === 'cud') {
           f.masked = true;
           if (f.mask == null) f.mask = String(v);
@@ -345,9 +361,10 @@
         const v = user[k];
         if (v == null || String(v).trim() === '') continue;
         const hashed = looksHashedSha256(v);
+        const opaque = (k === 'external_id'); // opaque id, unhashed is not a leak
         identifiers.push({
           field: k, bucket: def.bucket, label: def.label,
-          hashed, plaintext: !hashed, masked: false, mask: null,
+          hashed, plaintext: !hashed && !opaque, masked: false, mask: null, opaque,
         });
         hashParams['user[' + k + ']'] = String(v);
       }

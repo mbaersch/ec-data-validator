@@ -1197,6 +1197,12 @@ document.addEventListener('DOMContentLoaded', () => {
         return identifiers.map(f => {
             const def = DETECTOR_BUCKET_PILL[f.bucket] || { cls: '', label: f.label || f.field };
             const fld = escapeHtml(f.field);
+            if (f.opaque) {
+                // Opaque advertiser id (external_id) — not PII, so never a "leak"
+                // whether it arrives hashed or as a plain value.
+                const state = f.hashed ? 'SHA-256 hashed' : 'plain value (opaque id, not PII)';
+                return `<span class="cap-pill ${def.cls}" title="${escapeHtml(def.label)} — ${state}">${fld}</span>`;
+            }
             if (f.plaintext) {
                 return `<span class="cap-pill pii-raw" title="${escapeHtml(def.label)} sent UNHASHED — plaintext PII leaving the browser">${fld} ⚠ raw</span>`;
             }
@@ -1273,11 +1279,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (cap.provider) {
                     // Detector capture (Meta etc.): load its request string into
                     // the em field and let runUpdate render the validation below —
-                    // same place as the Google em result. An event without any
-                    // advanced-matching fields has nothing to validate → detail view.
+                    // same place as the Google em result. Only when there's an
+                    // actual validatable hash slot; an event carrying just a plain
+                    // param (e.g. cd[external_id], no ud/aud hashes) has nothing to
+                    // validate → detail view.
                     const d = (typeof EcDetectors !== 'undefined') ? EcDetectors.byId(cap.provider) : null;
-                    if (d && d.validation && cap.identifiers && cap.identifiers.length) {
-                        emInput.value = detectorRequestString(cap, d.validation);
+                    const reqStr = (d && d.validation) ? detectorRequestString(cap, d.validation) : '';
+                    if (reqStr && parseDetectorRequest(reqStr)) {
+                        emInput.value = reqStr;
                         activateTab('tab-em');
                         chrome.storage.local.set({ activeTab: 'tab-em' });
                         runUpdate();
