@@ -32,9 +32,9 @@ dist/
 build/
 docs/superpowers/
 
-# Test- und Screenshot-Outputs
-screenshots/
-webstore/
+# Test-Outputs (screenshots/ and webstore/ ARE tracked — the scripts that
+# generate them live in the repo, so the shots are versioned alongside them and
+# the README can reference them by relative path)
 test-results/
 playwright-report/
 tmp-user-data*/
