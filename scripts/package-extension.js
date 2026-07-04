@@ -17,6 +17,7 @@ fs.mkdirSync(distDir);
 const filesToInclude = [
   'manifest.json',
   'background.js',
+  'detectors.js',
   'popup.html',
   'popup.js',
   'theme-prehydrate.js',
