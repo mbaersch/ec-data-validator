@@ -521,10 +521,106 @@
   };
 
   // -------------------------------------------------------------------------
+  // Microsoft Bing UET
+  // -------------------------------------------------------------------------
+  //
+  // A UET hit goes to bat.bing.com/action/0 (or /actionp/0), CST/Flex tags to
+  // commerce.bing.com/cst/0 — GET beacons. Enhanced-conversions user data rides
+  // inside the `pid` parameter as a NESTED querystring: "em=<sha256>&ph=<sha256>
+  // &fn=…&ln=…" (email/phone/first/last, SHA-256). We parse that inner string and
+  // flatten it to synthetic pid[<field>] slots for the shared plumbing.
+
+  const UET_FIELD = {
+    em: { bucket: 'email',     label: 'Email' },
+    ph: { bucket: 'phone',     label: 'Phone' },
+    fn: { bucket: 'firstName', label: 'First name' },
+    ln: { bucket: 'lastName',  label: 'Last name' },
+  };
+
+  function isBingHost(host) {
+    const h = (host || '').toLowerCase();
+    return h === 'bat.bing.com' || h === 'commerce.bing.com';
+  }
+
+  function isUetPath(pathname) {
+    const p = pathname || '';
+    return /\/actionp?(\/|$)/.test(p) || /\/cst(\/|$)/.test(p);
+  }
+
+  const bingDetector = {
+    id: 'bing',
+    label: 'Bing UET',
+    permissionOrigins: ['https://bat.bing.com/*', 'https://commerce.bing.com/*'],
+
+    match(host, pathname) {
+      return isBingHost(host) && isUetPath(pathname);
+    },
+
+    validation: {
+      title: 'Bing UET',
+      note: 'email lower/trim · phone E.164 (+, no leading 0) · name letters only · SHA-256',
+      eventParam: 'evt',
+      hashSlotRe: /^(pid)\[([\w]+)\]$/,
+      fields: {
+        em: { verifyId: 'v_email', label: 'Email',      normalize: normTrimLower },
+        ph: { verifyId: 'v_phone', label: 'Phone',      normalize: normPhoneE164 },
+        fn: { verifyId: 'v_fn',    label: 'First name', normalize: normLettersLower },
+        ln: { verifyId: 'v_ln',    label: 'Last name',  normalize: normLettersLower },
+      },
+      labels: {},
+    },
+
+    // ctx: { url, host, pathname, queryParams, bodyParams }
+    parse(ctx) {
+      const q = ctx.queryParams || {};
+      const b = ctx.bodyParams || {};
+      const get = (k) => (k in q ? q[k] : (b && k in b ? b[k] : null));
+
+      const ti = get('ti');
+      if (!ti) return null; // a UET hit always carries its tag id
+
+      const evt = get('evt');
+      const pidRaw = get('pid');
+
+      const identifiers = [];
+      const hashParams = {};
+      if (evt != null && evt !== '') hashParams.evt = String(evt);
+      if (pidRaw != null && pidRaw !== '') {
+        let inner = null;
+        try { inner = new URLSearchParams(String(pidRaw)); } catch (e) { inner = null; }
+        if (inner) {
+          for (const [k, v] of inner) {
+            const def = UET_FIELD[k];
+            if (!def) continue;
+            if (v == null || String(v).trim() === '') continue;
+            const hashed = looksHashedSha256(v);
+            identifiers.push({
+              field: k, bucket: def.bucket, label: def.label,
+              hashed, plaintext: !hashed, masked: false, mask: null,
+            });
+            hashParams['pid[' + k + ']'] = String(v);
+          }
+        }
+      }
+
+      return {
+        provider: 'bing',
+        transport: 'standard',
+        event: evt != null && evt !== '' ? String(evt) : null,
+        standardEvent: false,
+        providerId: String(ti),
+        identifiers,
+        consent: null,
+        hashParams,
+      };
+    },
+  };
+
+  // -------------------------------------------------------------------------
   // Registry
   // -------------------------------------------------------------------------
 
-  const registry = [metaDetector, tiktokDetector, pinterestDetector];
+  const registry = [metaDetector, tiktokDetector, pinterestDetector, bingDetector];
 
   root.EcDetectors = {
     registry,

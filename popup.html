@@ -19,6 +19,7 @@
       --surface-cool: #eff6ff;
       --card-tiktok:  #fdf4ff;
       --card-pinterest: #fef2f2;
+      --card-bing: #ecfdf6;
       --text: #1e293b;
       --text-muted: #64748b;
       --text-faint: #94a3b8;
@@ -48,6 +49,7 @@
       --surface-cool: #1a2230;
       --card-tiktok:  #241826;
       --card-pinterest: #2a1a1c;
+      --card-bing: #16282a;
       --text: #e2e8f0;
       --text-muted: #94a3b8;
       --text-faint: #64748b;
@@ -197,6 +199,7 @@
     .cap-card.source-meta { border-left: 3px solid #1877f2; padding-left: 8px; background: var(--surface-cool); }
     .cap-card.source-tiktok { border-left: 3px solid #ff0050; padding-left: 8px; background: var(--card-tiktok); }
     .cap-card.source-pinterest { border-left: 3px solid #e60023; padding-left: 8px; background: var(--card-pinterest); }
+    .cap-card.source-bing { border-left: 3px solid #0a8a8a; padding-left: 8px; background: var(--card-bing); }
 
     /* Detector validation renders in the em result area (same place as the
        Google em result). */
@@ -408,6 +411,13 @@
         <div class="settings-text">
           <div class="settings-label">Pinterest Tag</div>
           <div class="settings-desc">Detect user data in Pinterest Tag requests (<code>ct.pinterest.com/v3</code>). Enabling asks for permission to read <code>ct.pinterest.com</code> requests; disabling revokes it again. The enhanced-match email (<code>pd.em</code>) is hashed with SHA-256, SHA-1 or MD5 — the validator detects which by length. A known field arriving unhashed is flagged as a <strong>plaintext leak</strong>.</div>
+        </div>
+      </label>
+      <label class="settings-item">
+        <input type="checkbox" id="svcBing">
+        <div class="settings-text">
+          <div class="settings-label">Bing UET</div>
+          <div class="settings-desc">Detect user data in Microsoft Bing UET requests (<code>bat.bing.com/action</code>, <code>commerce.bing.com/cst</code>). Enabling asks for permission to read <code>bat.bing.com</code> / <code>commerce.bing.com</code> requests; disabling revokes it again. Enhanced-conversions fields ride in the <code>pid</code> parameter (<code>em</code>, <code>ph</code>, <code>fn</code>, <code>ln</code>), SHA-256 hashed — a known field arriving unhashed is flagged as a <strong>plaintext leak</strong>.</div>
         </div>
       </label>
     </div>

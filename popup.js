@@ -1673,6 +1673,7 @@ document.addEventListener('DOMContentLoaded', () => {
         { elId: 'svcMeta',      flag: 'meta',      origins: ['https://*.facebook.com/*'] },
         { elId: 'svcTiktok',    flag: 'tiktok',    origins: ['https://analytics.tiktok.com/*'] },
         { elId: 'svcPinterest', flag: 'pinterest', origins: ['https://ct.pinterest.com/*'] },
+        { elId: 'svcBing',      flag: 'bing',      origins: ['https://bat.bing.com/*', 'https://commerce.bing.com/*'] },
     ];
     let enabledDetectors = {};
 
