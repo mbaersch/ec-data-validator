@@ -13,6 +13,11 @@
       --surface-warm: #fff7ed;
       --surface-warm-hover: #fef0e0;
       --surface-hover-primary: #fef9f4;
+      /* Per-provider card tints — inherited from the sibling tracking-auditor
+         extension so a mixed stream scans the same way: GA amber, Meta cool
+         blue, TikTok fuchsia. */
+      --surface-cool: #eff6ff;
+      --card-tiktok:  #fdf4ff;
       --text: #1e293b;
       --text-muted: #64748b;
       --text-faint: #94a3b8;
@@ -39,6 +44,8 @@
       --surface-warm: #2a2218;
       --surface-warm-hover: #332918;
       --surface-hover-primary: #2a2018;
+      --surface-cool: #1a2230;
+      --card-tiktok:  #241826;
       --text: #e2e8f0;
       --text-muted: #94a3b8;
       --text-faint: #64748b;
@@ -162,7 +169,7 @@
     .cap-card:hover { border-color: var(--primary); background: var(--surface-hover-primary); }
     .cap-card.no-em { opacity: 0.55; cursor: default; }
     .cap-card.no-em:hover { background: var(--surface); border-color: var(--border); }
-    .cap-card.source-ga { border-left: 3px solid #7c3aed; padding-left: 8px; }
+    .cap-card.source-ga { border-left: 3px solid #e37400; padding-left: 8px; background: var(--surface-warm); }
     .cap-card.transport-first-party { background: var(--surface-warm); }
     .cap-card.transport-first-party:hover { background: var(--surface-warm-hover); border-color: var(--primary); }
     .cap-card-head { display: flex; gap: 6px; align-items: baseline; font-family: 'Fira Code', 'Consolas', monospace; font-size: 10px; color: var(--text-muted); margin-bottom: 6px; flex-wrap: wrap; }
@@ -185,8 +192,8 @@
     .cap-pill.pii-raw    { background: #fee2e2; color: #991b1b; }
     .cap-pill.pii-masked { background: #f1f5f9; color: #64748b; }
     .cap-pill.meta-event { background: #e7f0fe; color: #1877f2; }
-    .cap-card.source-meta { border-left: 3px solid #1877f2; padding-left: 8px; }
-    .cap-card.source-tiktok { border-left: 3px solid #ff0050; padding-left: 8px; }
+    .cap-card.source-meta { border-left: 3px solid #1877f2; padding-left: 8px; background: var(--surface-cool); }
+    .cap-card.source-tiktok { border-left: 3px solid #ff0050; padding-left: 8px; background: var(--card-tiktok); }
 
     /* Detector validation renders in the em result area (same place as the
        Google em result). */
