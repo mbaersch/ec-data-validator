@@ -39,6 +39,11 @@
   // do reliably without a country signal, so we leave zip+4 length as-is.
   function normZip(v)          { return String(v).trim().toLowerCase().replace(/[^a-z0-9]/g, ''); }
   function normCountry(v)      { return String(v).trim().toLowerCase(); }                 // ISO-3166-1 alpha-2
+  // opaque advertiser ID (external_id): trim only, NO lower-casing — these IDs
+  // (CRM numbers etc.) are hashed exactly as provided and are case-sensitive.
+  // Paired with the field's exact:true flag so the validator hashes case-
+  // preservingly and runs no raw-vs-normalized diagnostic (exact IS canonical).
+  function normId(v)           { return String(v).trim(); }
   // phone in E.164: keep a leading '+', map a leading '00' intl prefix to '+',
   // strip everything else non-digit. Used by providers that hash the '+' form
   // (TikTok, Google) — unlike Meta, which hashes digits only without the '+'.
@@ -185,9 +190,11 @@
         ct:      { verifyId: 'v_city',    label: 'City',       normalize: normLettersLower },
         st:      { verifyId: 'v_region',  label: 'State',      normalize: normLettersLower },
         zp:      { verifyId: 'v_postal',  label: 'Zip',        normalize: normZip },
-        country: { verifyId: 'v_country', label: 'Country',    normalize: normCountry }
+        country: { verifyId: 'v_country', label: 'Country',    normalize: normCountry },
+        // Opaque ID — hashed exactly as provided (case-sensitive), no normalization.
+        external_id: { verifyId: 'v_extid', label: 'External ID', normalize: normId, exact: true }
       },
-      labels: { ge: 'Gender', db: 'Date of birth', external_id: 'External ID' }
+      labels: { ge: 'Gender', db: 'Date of birth' }
     },
 
     // ctx: { url, host, pathname, queryParams, bodyParams }
@@ -309,8 +316,10 @@
         state:        { verifyId: 'v_region',  label: 'State',      normalize: normLettersLower },
         zip_code:     { verifyId: 'v_postal',  label: 'Zip',        normalize: normZip },
         country:      { verifyId: 'v_country', label: 'Country',    normalize: normCountry },
+        // Opaque ID — hashed exactly as provided (case-sensitive), no normalization.
+        external_id:  { verifyId: 'v_extid',   label: 'External ID', normalize: normId, exact: true },
       },
-      labels: { external_id: 'External ID' },
+      labels: {},
     },
 
     // ctx: { url, host, pathname, queryParams, bodyParams }

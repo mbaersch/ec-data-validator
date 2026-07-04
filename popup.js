@@ -129,7 +129,10 @@ document.addEventListener('DOMContentLoaded', () => {
         { id: 'v_city',    label: 'City',    placeholder: 'Berlin', hashKeys: [] },
         { id: 'v_region',  label: 'State',   placeholder: 'BE',     hashKeys: [] },
         { id: 'v_postal',  label: 'Zip',     placeholder: '10115',  hashKeys: [] },
-        { id: 'v_country', label: 'Country', placeholder: 'DE',     hashKeys: [] }
+        { id: 'v_country', label: 'Country', placeholder: 'DE',     hashKeys: [] },
+        // Opaque advertiser ID (Meta/TikTok external_id). Detector-only; hashed
+        // exactly (case-sensitive) via the profile field's exact flag.
+        { id: 'v_extid',   label: 'External ID', placeholder: 'CRM-12345', hashKeys: [] }
     ];
     const hashKeyToVerifyId = {};
     verifyFields.forEach(f => f.hashKeys.forEach(k => { hashKeyToVerifyId[k] = f.id; }));
@@ -737,7 +740,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 label: (fv && fv.label) || (profile.labels && profile.labels[field]) || field,
                 value: String(value),
                 verifyId: fv ? fv.verifyId : null,
-                normalize: fv ? fv.normalize : null
+                normalize: fv ? fv.normalize : null,
+                exact: fv ? !!fv.exact : false
             });
         }
         return out;
@@ -754,11 +758,17 @@ document.addEventListener('DOMContentLoaded', () => {
             .map(async f => {
                 const val = verifyState[f.verifyId];
                 const normalized = f.normalize(val);
-                const exp = await sha256(normalized);
+                // Exact fields (opaque IDs) hash case-preservingly; all others
+                // fold to lower-case as every platform does.
+                const exp = await sha256(normalized, f.exact);
                 if (!exp) return;
-                const rawVal = rawInputFor(f.verifyId, val);
-                if (rawVal && rawVal.trim() !== normalized.toLowerCase().trim()) {
-                    exp.raw = await sha256(rawVal, true);
+                // No canonical-vs-raw split for exact fields — exact IS canonical,
+                // so a raw candidate would only mislead.
+                if (!f.exact) {
+                    const rawVal = rawInputFor(f.verifyId, val);
+                    if (rawVal && rawVal.trim() !== normalized.toLowerCase().trim()) {
+                        exp.raw = await sha256(rawVal, true);
+                    }
                 }
                 cmp[f.verifyId] = exp;
             }));
