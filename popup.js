@@ -269,8 +269,10 @@ document.addEventListener('DOMContentLoaded', () => {
             return `<span class="match">MATCH</span><span class="fmt-warn" title="${tip}">META ONLY · NO '+'</span>`;
         }
         if (r.variant === 'raw') {
+            // Orange, not green: the hash reproduces locally but will never
+            // match on the receiver side — a failed implementation, not a win.
             const tip = 'Hash matches the value exactly as entered, NOT its normalized form. It was hashed un-normalized (manually or by a template) and will NOT match on the ad-platform side, which normalizes before matching.';
-            return `<span class="match">MATCH</span><span class="fmt-warn" title="${tip}">RAW · NOT NORMALIZED</span>`;
+            return `<span class="match-warn">MATCH</span><span class="fmt-warn" title="${tip}">RAW · NOT NORMALIZED</span>`;
         }
         if (r.normalizedInput) {
             const tip = 'Match after normalizing your input (e.g. 004912345 → 4912345 / +49…). The sent value is correctly normalized; your entry just used a looser format.';
