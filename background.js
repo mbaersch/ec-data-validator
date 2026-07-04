@@ -1,5 +1,9 @@
 console.log('[ec-validator] background.js loaded at', new Date().toISOString());
 
+// Third-party PII detectors (Meta, later TikTok/Pinterest/Bing). Pure helper
+// module, safe to importScripts at the SW top level — it touches no chrome APIs.
+importScripts('detectors.js');
+
 // chrome.sidePanel exists only in Chrome/Edge. Opera (and Firefox) expose the
 // sidebar via sidebar_action / chrome.sidebarAction and have no chrome.sidePanel
 // at all — touching it unguarded throws a TypeError at the SW top level, which
@@ -35,19 +39,35 @@ function buildListenerPatterns(grantedOrigins) {
 
 let state = { recording: false, captures: [], userDataIndicator: false };
 
+// Which third-party detectors are switched on (e.g. { meta: true }). Persisted
+// separately from captureState because the panel writes it directly on toggle;
+// the SW keeps an in-memory copy in sync via storage.onChanged. A detector only
+// parses requests while its flag is true — independent of how its host
+// permission was granted.
+let enabledDetectors = {};
+
 function persist() {
   chrome.storage.local.set({ captureState: state });
 }
 
 const bootstrapPromise = new Promise(resolve => {
-  chrome.storage.local.get('captureState', (res) => {
+  chrome.storage.local.get(['captureState', 'enabledDetectors'], (res) => {
     if (res.captureState) {
       state.captures = Array.isArray(res.captureState.captures) ? res.captureState.captures : [];
       state.recording = !!res.captureState.recording;
       state.userDataIndicator = !!res.captureState.userDataIndicator;
     }
+    if (res.enabledDetectors && typeof res.enabledDetectors === 'object') {
+      enabledDetectors = res.enabledDetectors;
+    }
     resolve();
   });
+});
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local' && changes.enabledDetectors) {
+    enabledDetectors = changes.enabledDetectors.newValue || {};
+  }
 });
 
 chrome.runtime.onStartup.addListener(() => {
@@ -557,6 +577,50 @@ function clearAllBadges() {
   });
 }
 
+// Build and store a capture for a third-party detector (Meta etc.). Kept
+// separate from the Google path: the record carries `provider`/`identifiers`
+// instead of em/userData, and the Google-shaped fields stay null so the
+// existing capture rendering and indicator logic ignore it.
+function handleDetectorRequest(detector, details, host, pathname) {
+  const { queryParams, bodyParams } = extractAllParams(details.url, details.requestBody);
+  let parsed;
+  try {
+    parsed = detector.parse({ url: details.url, host, pathname, queryParams, bodyParams });
+  } catch (e) {
+    console.error('[ec-validator] detector parse failed:', detector.id, e);
+    return;
+  }
+  if (!parsed) return;
+
+  const capture = {
+    ts: details.timeStamp,
+    url: details.url,
+    host,
+    method: details.method,
+    provider: detector.id,
+    source: detector.id,                 // e.g. 'meta' — drives card styling + filter
+    transport: parsed.transport || 'standard',
+    event: parsed.event || null,
+    providerId: parsed.providerId || null,
+    identifiers: parsed.identifiers || [],
+    detectorConsent: parsed.consent || null,
+    // Google-shaped fields stay null so the existing panel code paths skip it.
+    em: null, eme: null, userData: null, conversion: null, consent: null,
+    queryParams,
+    bodyParams,
+    truncated: false,
+    customLoader: null,
+    decodedUrl: null
+  };
+  enforceCap(capture);
+  state.captures.push(capture);
+  if (state.captures.length > RING_SIZE) {
+    state.captures = state.captures.slice(-RING_SIZE);
+  }
+  persist();
+  broadcast({ type: 'captureAdded', capture, count: state.captures.length });
+}
+
 function handleRequest(details) {
   if (!state.recording && !state.userDataIndicator) return;
   if (isBlockedInitiator(details.initiator)) return;
@@ -567,6 +631,15 @@ function handleRequest(details) {
     host = u.host;
     pathname = u.pathname;
   } catch (e) { return; }
+
+  // Third-party detectors (Meta etc.) take precedence over the Google path —
+  // their hosts never overlap with the Google endpoints. Only relevant while
+  // recording; the always-on indicator stays Google-only.
+  const detector = EcDetectors.match(host, pathname, enabledDetectors);
+  if (detector) {
+    if (state.recording) handleDetectorRequest(detector, details, host, pathname);
+    return;
+  }
 
   const transport = isGoogleHost(host) ? 'google' : 'first-party';
 
