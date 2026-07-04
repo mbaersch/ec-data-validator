@@ -20,6 +20,15 @@
     return typeof v === 'string' && /^[0-9a-f]{64}$/i.test(v.trim());
   }
 
+  // Pinterest (and Bing) accept SHA-256 (64), SHA-1 (40) or MD5 (32) hex — so a
+  // value that is any of those lengths of hex is "hashed"; anything else in a
+  // hash slot (e.g. a plaintext email) is a leak.
+  function looksHashedAny(v) {
+    if (typeof v !== 'string') return false;
+    const s = v.trim();
+    return [32, 40, 64].includes(s.length) && /^[0-9a-f]+$/i.test(s);
+  }
+
   // Field normalizers used by the validation profiles. Each provider hashes
   // its advanced-matching fields with its own normalization; a validator must
   // reproduce it exactly to compare. These are the building blocks — providers
@@ -44,6 +53,8 @@
   // Paired with the field's exact:true flag so the validator hashes case-
   // preservingly and runs no raw-vs-normalized diagnostic (exact IS canonical).
   function normId(v)           { return String(v).trim(); }
+  // Pinterest email: lower-case, no spaces at all (per Pinterest's help).
+  function normEmailNoSpace(v) { return String(v).toLowerCase().replace(/\s/g, ''); }
   // phone in E.164: keep a leading '+', map a leading '00' intl prefix to '+',
   // strip everything else non-digit. Used by providers that hash the '+' form
   // (TikTok, Google) — unlike Meta, which hashes digits only without the '+'.
@@ -383,10 +394,137 @@
   };
 
   // -------------------------------------------------------------------------
+  // Pinterest Tag
+  // -------------------------------------------------------------------------
+  //
+  // A browser tag hit goes to ct.pinterest.com/v3/ as a GET beacon. Enhanced
+  // match rides in the `pd` param, either as a URL-encoded JSON object (JS tag:
+  // pd={"em":"<hash>",…}) or as bracket params (noscript: pd[em]=<hash>). The
+  // hash may be SHA-256, SHA-1 OR MD5 (hex) — the panel detects which by length.
+  // We flatten pd into synthetic pd[<field>] slots (like TikTok's context.user),
+  // so the shared validation plumbing applies unchanged.
+
+  const PINTEREST_FIELD = {
+    em:           { bucket: 'email',      label: 'Email' },
+    ph:           { bucket: 'phone',      label: 'Phone' },
+    fn:           { bucket: 'firstName',  label: 'First name' },
+    ln:           { bucket: 'lastName',   label: 'Last name' },
+    ct:           { bucket: 'city',       label: 'City' },
+    st:           { bucket: 'region',     label: 'State' },
+    zp:           { bucket: 'postal',     label: 'Zip' },
+    country:      { bucket: 'country',    label: 'Country' },
+    ge:           { bucket: 'gender',     label: 'Gender' },
+    db:           { bucket: 'dob',        label: 'Date of birth' },
+    external_id:  { bucket: 'externalId', label: 'External ID' },
+    hashed_maids: { bucket: 'maid',       label: 'Mobile ad ID' },
+  };
+
+  function isPinterestHost(host) {
+    return (host || '').toLowerCase() === 'ct.pinterest.com';
+  }
+
+  function isPinterestV3Path(pathname) {
+    return /^\/v3(\/|$)/.test(pathname || '');
+  }
+
+  // Recover the enhanced-match object: the JSON `pd` param, or bracket params.
+  function pinterestPd(ctx) {
+    const q = ctx.queryParams || {};
+    const b = ctx.bodyParams || {};
+    const pdRaw = (q.pd != null ? q.pd : (b && b.pd != null ? b.pd : null));
+    if (pdRaw && typeof pdRaw === 'string') {
+      try {
+        const o = JSON.parse(pdRaw);
+        if (o && typeof o === 'object' && !Array.isArray(o)) return o;
+      } catch (e) { /* not the JSON variant */ }
+    }
+    const pd = {};
+    const scan = (params) => {
+      for (const k of Object.keys(params || {})) {
+        const m = /^pd\[([\w]+)\]$/.exec(k);
+        if (m) pd[m[1]] = params[k];
+      }
+    };
+    scan(q); scan(b);
+    return Object.keys(pd).length ? pd : null;
+  }
+
+  const pinterestDetector = {
+    id: 'pinterest',
+    label: 'Pinterest Tag',
+    permissionOrigins: ['https://ct.pinterest.com/*'],
+
+    match(host, pathname) {
+      return isPinterestHost(host) && isPinterestV3Path(pathname);
+    },
+
+    validation: {
+      title: 'Pinterest Tag',
+      note: 'email lower-case, no spaces · hash SHA-256 / SHA-1 / MD5 (auto-detected by length)',
+      eventParam: 'event',
+      hashSlotRe: /^(pd)\[([\w]+)\]$/,
+      fields: {
+        em:          { verifyId: 'v_email', label: 'Email', normalize: normEmailNoSpace },
+        external_id: { verifyId: 'v_extid', label: 'External ID', normalize: normId, exact: true },
+      },
+      // Pinterest can carry the full set, but only the email rule is documented;
+      // the rest are shown hash-only rather than validated against guessed rules.
+      labels: {
+        ph: 'Phone', fn: 'First name', ln: 'Last name', ct: 'City', st: 'State',
+        zp: 'Zip', country: 'Country', ge: 'Gender', db: 'Date of birth', hashed_maids: 'Mobile ad ID',
+      },
+    },
+
+    // ctx: { url, host, pathname, queryParams, bodyParams }
+    parse(ctx) {
+      const q = ctx.queryParams || {};
+      const b = ctx.bodyParams || {};
+      const get = (k) => (k in q ? q[k] : (b && k in b ? b[k] : null));
+
+      const tid = get('tid');
+      if (!tid) return null; // a tag hit always carries its tag id
+
+      const event = get('event');
+      const pd = pinterestPd(ctx);
+
+      const identifiers = [];
+      const hashParams = {};
+      if (event != null && event !== '') hashParams.event = String(event);
+      if (pd) {
+        for (const k of Object.keys(pd)) {
+          const def = PINTEREST_FIELD[k];
+          if (!def) continue;
+          let v = pd[k];
+          if (Array.isArray(v)) v = v[0];
+          if (v == null || String(v).trim() === '') continue;
+          const hashed = looksHashedAny(v);
+          const opaque = (k === 'external_id' || k === 'hashed_maids');
+          identifiers.push({
+            field: k, bucket: def.bucket, label: def.label,
+            hashed, plaintext: !hashed && !opaque, masked: false, mask: null, opaque,
+          });
+          hashParams['pd[' + k + ']'] = String(v);
+        }
+      }
+
+      return {
+        provider: 'pinterest',
+        transport: 'standard',
+        event: event != null && event !== '' ? String(event) : null,
+        standardEvent: false,
+        providerId: String(tid),
+        identifiers,
+        consent: null,        // Pinterest's ppce is a response header, not in the request
+        hashParams,
+      };
+    },
+  };
+
+  // -------------------------------------------------------------------------
   // Registry
   // -------------------------------------------------------------------------
 
-  const registry = [metaDetector, tiktokDetector];
+  const registry = [metaDetector, tiktokDetector, pinterestDetector];
 
   root.EcDetectors = {
     registry,

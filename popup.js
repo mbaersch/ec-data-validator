@@ -218,9 +218,82 @@ document.addEventListener('DOMContentLoaded', () => {
         return { hex, b64url };
     }
 
+    // Compact MD5 (hex). Web Crypto has no MD5, but Pinterest accepts SHA-256,
+    // SHA-1 OR MD5 for its hashed identifiers, so the validator needs it. Standard
+    // implementation (RFC 1321 / blueimp core); verified against known vectors.
+    function md5(str) {
+        function safeAdd(x, y) { const lsw = (x & 0xFFFF) + (y & 0xFFFF); const msw = (x >> 16) + (y >> 16) + (lsw >> 16); return (msw << 16) | (lsw & 0xFFFF); }
+        function rol(n, c) { return (n << c) | (n >>> (32 - c)); }
+        function cmn(q, a, b, x, s, t) { return safeAdd(rol(safeAdd(safeAdd(a, q), safeAdd(x, t)), s), b); }
+        function ff(a, b, c, d, x, s, t) { return cmn((b & c) | (~b & d), a, b, x, s, t); }
+        function gg(a, b, c, d, x, s, t) { return cmn((b & d) | (c & ~d), a, b, x, s, t); }
+        function hh(a, b, c, d, x, s, t) { return cmn(b ^ c ^ d, a, b, x, s, t); }
+        function ii(a, b, c, d, x, s, t) { return cmn(c ^ (b | ~d), a, b, x, s, t); }
+        function binlMD5(x, len) {
+            x[len >> 5] |= 0x80 << (len % 32); x[(((len + 64) >>> 9) << 4) + 14] = len;
+            let a = 1732584193, b = -271733879, c = -1732584194, d = 271733878;
+            for (let i = 0; i < x.length; i += 16) {
+                const oa = a, ob = b, oc = c, od = d;
+                a = ff(a, b, c, d, x[i], 7, -680876936); d = ff(d, a, b, c, x[i + 1], 12, -389564586); c = ff(c, d, a, b, x[i + 2], 17, 606105819); b = ff(b, c, d, a, x[i + 3], 22, -1044525330);
+                a = ff(a, b, c, d, x[i + 4], 7, -176418897); d = ff(d, a, b, c, x[i + 5], 12, 1200080426); c = ff(c, d, a, b, x[i + 6], 17, -1473231341); b = ff(b, c, d, a, x[i + 7], 22, -45705983);
+                a = ff(a, b, c, d, x[i + 8], 7, 1770035416); d = ff(d, a, b, c, x[i + 9], 12, -1958414417); c = ff(c, d, a, b, x[i + 10], 17, -42063); b = ff(b, c, d, a, x[i + 11], 22, -1990404162);
+                a = ff(a, b, c, d, x[i + 12], 7, 1804603682); d = ff(d, a, b, c, x[i + 13], 12, -40341101); c = ff(c, d, a, b, x[i + 14], 17, -1502002290); b = ff(b, c, d, a, x[i + 15], 22, 1236535329);
+                a = gg(a, b, c, d, x[i + 1], 5, -165796510); d = gg(d, a, b, c, x[i + 6], 9, -1069501632); c = gg(c, d, a, b, x[i + 11], 14, 643717713); b = gg(b, c, d, a, x[i], 20, -373897302);
+                a = gg(a, b, c, d, x[i + 5], 5, -701558691); d = gg(d, a, b, c, x[i + 10], 9, 38016083); c = gg(c, d, a, b, x[i + 15], 14, -660478335); b = gg(b, c, d, a, x[i + 4], 20, -405537848);
+                a = gg(a, b, c, d, x[i + 9], 5, 568446438); d = gg(d, a, b, c, x[i + 14], 9, -1019803690); c = gg(c, d, a, b, x[i + 3], 14, -187363961); b = gg(b, c, d, a, x[i + 8], 20, 1163531501);
+                a = gg(a, b, c, d, x[i + 13], 5, -1444681467); d = gg(d, a, b, c, x[i + 2], 9, -51403784); c = gg(c, d, a, b, x[i + 7], 14, 1735328473); b = gg(b, c, d, a, x[i + 12], 20, -1926607734);
+                a = hh(a, b, c, d, x[i + 5], 4, -378558); d = hh(d, a, b, c, x[i + 8], 11, -2022574463); c = hh(c, d, a, b, x[i + 11], 16, 1839030562); b = hh(b, c, d, a, x[i + 14], 23, -35309556);
+                a = hh(a, b, c, d, x[i + 1], 4, -1530992060); d = hh(d, a, b, c, x[i + 4], 11, 1272893353); c = hh(c, d, a, b, x[i + 7], 16, -155497632); b = hh(b, c, d, a, x[i + 10], 23, -1094730640);
+                a = hh(a, b, c, d, x[i + 13], 4, 681279174); d = hh(d, a, b, c, x[i], 11, -358537222); c = hh(c, d, a, b, x[i + 3], 16, -722521979); b = hh(b, c, d, a, x[i + 6], 23, 76029189);
+                a = hh(a, b, c, d, x[i + 9], 4, -640364487); d = hh(d, a, b, c, x[i + 12], 11, -421815835); c = hh(c, d, a, b, x[i + 15], 16, 530742520); b = hh(b, c, d, a, x[i + 2], 23, -995338651);
+                a = ii(a, b, c, d, x[i], 6, -198630844); d = ii(d, a, b, c, x[i + 7], 10, 1126891415); c = ii(c, d, a, b, x[i + 14], 15, -1416354905); b = ii(b, c, d, a, x[i + 5], 21, -57434055);
+                a = ii(a, b, c, d, x[i + 12], 6, 1700485571); d = ii(d, a, b, c, x[i + 3], 10, -1894986606); c = ii(c, d, a, b, x[i + 10], 15, -1051523); b = ii(b, c, d, a, x[i + 1], 21, -2054922799);
+                a = ii(a, b, c, d, x[i + 8], 6, 1873313359); d = ii(d, a, b, c, x[i + 15], 10, -30611744); c = ii(c, d, a, b, x[i + 6], 15, -1560198380); b = ii(b, c, d, a, x[i + 13], 21, 1309151649);
+                a = ii(a, b, c, d, x[i + 4], 6, -145523070); d = ii(d, a, b, c, x[i + 11], 10, -1120210379); c = ii(c, d, a, b, x[i + 2], 15, 718787259); b = ii(b, c, d, a, x[i + 9], 21, -343485551);
+                a = safeAdd(a, oa); b = safeAdd(b, ob); c = safeAdd(c, oc); d = safeAdd(d, od);
+            }
+            return [a, b, c, d];
+        }
+        function bytesToWords(bytes) { const w = []; for (let i = 0; i < bytes.length * 8; i += 8) w[i >> 5] |= (bytes[i / 8] & 0xFF) << (i % 32); return w; }
+        function wordsToHex(words) { let hex = ''; for (let i = 0; i < words.length * 4; i++) hex += ((words[i >> 2] >> ((i % 4) * 8 + 4)) & 0x0F).toString(16) + ((words[i >> 2] >> ((i % 4) * 8)) & 0x0F).toString(16); return hex; }
+        const bytes = Array.from(new TextEncoder().encode(str));
+        return wordsToHex(binlMD5(bytesToWords(bytes), bytes.length * 8));
+    }
+
+    // Hash a value to hex in the requested algorithm. SHA-256 / SHA-1 via Web
+    // Crypto, MD5 via the routine above. Only SHA-256 also yields b64url (the
+    // only algo that turns up base64url-encoded, in Google's em token).
+    async function hashHexAlgo(msg, algo, preserveCase) {
+        if (!msg || msg.trim() === '') return null;
+        const prepared = preserveCase ? msg.trim() : msg.toLowerCase().trim();
+        if (algo === 'md5') return { hex: md5(prepared), b64url: null };
+        const bytes = new Uint8Array(await crypto.subtle.digest(algo === 'sha1' ? 'SHA-1' : 'SHA-256', new TextEncoder().encode(prepared)));
+        const hex = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+        let b64url = null;
+        if (algo === 'sha256') {
+            let bin = '';
+            for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+            b64url = btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+        }
+        return { hex, b64url };
+    }
+
+    // Which hash algorithm an observed value uses, inferred from its hex length
+    // (Pinterest allows all three). Non-hex (e.g. base64url) → null, so callers
+    // fall back to SHA-256, whose b64url form still matches.
+    function hashAlgoOf(v) {
+        if (typeof v !== 'string') return null;
+        const s = v.trim();
+        if (!/^[0-9a-f]+$/i.test(s)) return null;
+        if (s.length === 64) return 'sha256';
+        if (s.length === 40) return 'sha1';
+        if (s.length === 32) return 'md5';
+        return null;
+    }
+
     function detectHashEncoding(v) {
         if (!v) return null;
-        if (/^[0-9a-f]{64}$/i.test(v)) return 'hex';
+        if (/^([0-9a-f]{32}|[0-9a-f]{40}|[0-9a-f]{64})$/i.test(v)) return 'hex';
         if (/^[A-Za-z0-9_-]{43}={0,1}$/.test(v)) return 'b64url';
         return null;
     }
@@ -758,16 +831,19 @@ document.addEventListener('DOMContentLoaded', () => {
             .map(async f => {
                 const val = verifyState[f.verifyId];
                 const normalized = f.normalize(val);
+                // Match the observed hash's algorithm (Pinterest allows SHA-256 /
+                // SHA-1 / MD5); Meta/TikTok are always 64-hex → sha256, unchanged.
+                const algo = hashAlgoOf(f.value) || 'sha256';
                 // Exact fields (opaque IDs) hash case-preservingly; all others
                 // fold to lower-case as every platform does.
-                const exp = await sha256(normalized, f.exact);
+                const exp = await hashHexAlgo(normalized, algo, f.exact);
                 if (!exp) return;
                 // No canonical-vs-raw split for exact fields — exact IS canonical,
                 // so a raw candidate would only mislead.
                 if (!f.exact) {
                     const rawVal = rawInputFor(f.verifyId, val);
                     if (rawVal && rawVal.trim() !== normalized.toLowerCase().trim()) {
-                        exp.raw = await sha256(rawVal, true);
+                        exp.raw = await hashHexAlgo(rawVal, algo, true);
                     }
                 }
                 cmp[f.verifyId] = exp;
@@ -1183,7 +1259,8 @@ document.addEventListener('DOMContentLoaded', () => {
         country:    { cls: 'identifier-addr', label: 'Country' },
         externalId: { cls: 'source-userdata', label: 'External ID' },
         gender:     { cls: 'source-userdata', label: 'Gender' },
-        dob:        { cls: 'source-userdata', label: 'Date of birth' }
+        dob:        { cls: 'source-userdata', label: 'Date of birth' },
+        maid:       { cls: 'source-userdata', label: 'Mobile ad ID' }
     };
 
     // Render one pill per detector identifier field. Three states:
@@ -1593,8 +1670,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // detectors.js and a checkbox in popup.html. Origins mirror the detector's
     // permissionOrigins.
     const DETECTOR_TOGGLES = [
-        { elId: 'svcMeta',   flag: 'meta',   origins: ['https://*.facebook.com/*'] },
-        { elId: 'svcTiktok', flag: 'tiktok', origins: ['https://analytics.tiktok.com/*'] },
+        { elId: 'svcMeta',      flag: 'meta',      origins: ['https://*.facebook.com/*'] },
+        { elId: 'svcTiktok',    flag: 'tiktok',    origins: ['https://analytics.tiktok.com/*'] },
+        { elId: 'svcPinterest', flag: 'pinterest', origins: ['https://ct.pinterest.com/*'] },
     ];
     let enabledDetectors = {};
 

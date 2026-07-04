@@ -18,6 +18,7 @@
          blue, TikTok fuchsia. */
       --surface-cool: #eff6ff;
       --card-tiktok:  #fdf4ff;
+      --card-pinterest: #fef2f2;
       --text: #1e293b;
       --text-muted: #64748b;
       --text-faint: #94a3b8;
@@ -46,6 +47,7 @@
       --surface-hover-primary: #2a2018;
       --surface-cool: #1a2230;
       --card-tiktok:  #241826;
+      --card-pinterest: #2a1a1c;
       --text: #e2e8f0;
       --text-muted: #94a3b8;
       --text-faint: #64748b;
@@ -194,6 +196,7 @@
     .cap-pill.meta-event { background: #e7f0fe; color: #1877f2; }
     .cap-card.source-meta { border-left: 3px solid #1877f2; padding-left: 8px; background: var(--surface-cool); }
     .cap-card.source-tiktok { border-left: 3px solid #ff0050; padding-left: 8px; background: var(--card-tiktok); }
+    .cap-card.source-pinterest { border-left: 3px solid #e60023; padding-left: 8px; background: var(--card-pinterest); }
 
     /* Detector validation renders in the em result area (same place as the
        Google em result). */
@@ -398,6 +401,13 @@
         <div class="settings-text">
           <div class="settings-label">TikTok Pixel</div>
           <div class="settings-desc">Detect user data in TikTok Pixel requests (<code>analytics.tiktok.com/api/v2/pixel</code>). Enabling asks for permission to read <code>analytics.tiktok.com</code> requests; disabling revokes it again. Advanced-matching fields in <code>context.user</code> (<code>email</code>, <code>phone_number</code>, …) are normally SHA-256 hashed client-side — a known field arriving unhashed is flagged as a <strong>plaintext leak</strong>.</div>
+        </div>
+      </label>
+      <label class="settings-item">
+        <input type="checkbox" id="svcPinterest">
+        <div class="settings-text">
+          <div class="settings-label">Pinterest Tag</div>
+          <div class="settings-desc">Detect user data in Pinterest Tag requests (<code>ct.pinterest.com/v3</code>). Enabling asks for permission to read <code>ct.pinterest.com</code> requests; disabling revokes it again. The enhanced-match email (<code>pd.em</code>) is hashed with SHA-256, SHA-1 or MD5 — the validator detects which by length. A known field arriving unhashed is flagged as a <strong>plaintext leak</strong>.</div>
         </div>
       </label>
     </div>
