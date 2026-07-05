@@ -1328,11 +1328,22 @@ document.addEventListener('DOMContentLoaded', () => {
     // additional (non-Google) detector service is enabled — otherwise the single
     // Google-Ads focus needs no service filter. Chips reflect the services that
     // actually appear in the current captures.
+    // The per-service filter only exists while at least one non-Google detector
+    // is enabled. When it isn't, the bar is hidden AND its hidden set must NOT
+    // apply — otherwise a source hidden earlier (e.g. GA) would stay filtered out
+    // with no visible control to bring it back.
+    function serviceFilterActive() {
+        return !!(enabledDetectors && Object.values(enabledDetectors).some(Boolean));
+    }
+
+    function persistHiddenSources() {
+        chrome.storage.local.set({ hiddenSources: [...hiddenSources] });
+    }
+
     function renderFilterBar() {
         const bar = document.getElementById('capFilterBar');
-        const anyDetector = !!(enabledDetectors && Object.values(enabledDetectors).some(Boolean));
         const present = new Set(captures.map(c => c.source || 'ads'));
-        if (!anyDetector || present.size === 0) {
+        if (!serviceFilterActive() || present.size === 0) {
             bar.hidden = true;
             bar.innerHTML = '';
             return;
@@ -1340,6 +1351,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const sources = PROVIDER_ORDER.filter(s => present.has(s));
         present.forEach(s => { if (!PROVIDER_ORDER.includes(s)) sources.push(s); });
         let html = '<span class="cap-filter-label">Show</span>';
+        html += '<span class="cap-filter-links"><a class="cap-filter-link" data-flt="all" role="button" tabindex="0">all</a> · <a class="cap-filter-link" data-flt="none" role="button" tabindex="0">none</a></span>';
         html += sources.map(s => {
             const active = !hiddenSources.has(s);
             return `<span class="cap-filter-chip ${active ? 'active' : ''}" data-src="${escapeHtml(s)}" role="button" tabindex="0" aria-pressed="${active}">${escapeHtml(providerLabel(s))}</span>`;
@@ -1350,7 +1362,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const toggle = () => {
                 const s = chip.dataset.src;
                 if (hiddenSources.has(s)) hiddenSources.delete(s); else hiddenSources.add(s);
-                chrome.storage.local.set({ hiddenSources: [...hiddenSources] });
+                persistHiddenSources();
                 renderCaptures();
             };
             chip.addEventListener('click', toggle);
@@ -1358,15 +1370,28 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
             });
         });
+        bar.querySelectorAll('.cap-filter-link').forEach(link => {
+            const apply = () => {
+                if (link.dataset.flt === 'all') hiddenSources.clear();
+                else sources.forEach(s => hiddenSources.add(s)); // 'none' hides every listed service
+                persistHiddenSources();
+                renderCaptures();
+            };
+            link.addEventListener('click', apply);
+            link.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); apply(); }
+            });
+        });
     }
 
     function renderCaptures() {
         renderFilterBar();
         recCount.textContent = captures.length;
+        const serviceFilter = serviceFilterActive();
         const visible = captures.filter(c => {
             if (filterEmOnly && !captureHasUserData(c)) return false;
             if (!filterIncludeGa && (c.source || 'ads') === 'ga') return false;
-            if (hiddenSources.has(c.source || 'ads')) return false;
+            if (serviceFilter && hiddenSources.has(c.source || 'ads')) return false;
             return true;
         });
         if (visible.length === 0) {
