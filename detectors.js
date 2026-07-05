@@ -64,6 +64,9 @@
     const d = c.replace(/\+/g, '');
     return d.startsWith('00') ? '+' + d.slice(2) : d;
   }
+  // phone in E.164 digits WITHOUT the leading '+'. Used by Snapchat, which hashes
+  // the number without the plus (and otherwise only lower-cases).
+  function normPhoneNoPlus(v) { return normPhoneE164(v).replace(/^\+/, ''); }
 
   // UTF-8-safe base64 decode (for the base64-in-querystring GET transport).
   // atob + TextDecoder both exist in the service worker and the panel.
@@ -723,10 +726,241 @@
   };
 
   // -------------------------------------------------------------------------
+  // Snapchat Pixel
+  // -------------------------------------------------------------------------
+  //
+  // A browser pixel hit goes to tr.snapchat.com/p (numbered mirrors tr6.* exist).
+  // There are two shapes under /p: the GET carries the tracking event with all
+  // identifiers + e-commerce in the query string; the POST is internal telemetry
+  // with no user identifiers AND no pid/ev in the query — so requiring pid+ev
+  // below excludes it cleanly without needing the request method. All identifier
+  // and geo fields are SHA-256 of the LOWER-CASED value (Snapchat's only
+  // normalization — verified against u_fn / u_age / l_*); phone is hashed WITHOUT
+  // a leading '+'. u_hed is a derived/composite hash (no single plaintext), so it
+  // is surfaced hash-only, never validated or flagged as a leak.
+
+  const SNAP_FIELD = {
+    u_hem:  { bucket: 'email',      label: 'Email' },
+    u_hpn:  { bucket: 'phone',      label: 'Phone' },
+    u_fn:   { bucket: 'firstName',  label: 'First name' },
+    u_ln:   { bucket: 'lastName',   label: 'Last name' },
+    u_age:  { bucket: 'age',        label: 'Age' },
+    l_city: { bucket: 'city',       label: 'City' },
+    l_gc:   { bucket: 'country',    label: 'Country' },
+    l_gpc:  { bucket: 'postal',     label: 'Postal code' },
+    l_gr:   { bucket: 'region',     label: 'Region' },
+    u_hed:  { bucket: 'other',      label: 'Hashed data (u_hed)' },
+  };
+
+  const SNAP_STANDARD_EVENTS = new Set([
+    'page_view', 'view_content', 'add_cart', 'signup', 'sign_up', 'purchase', 'search',
+    'subscribe', 'start_checkout', 'add_billing', 'save', 'login', 'list_view', 'reserve',
+    'ad_click', 'ad_view', 'complete_tutorial', 'level_complete', 'invite', 'share',
+    'custom_event_1', 'custom_event_2', 'custom_event_3', 'custom_event_4', 'custom_event_5',
+  ]);
+
+  function isSnapchatHost(host) {
+    return /^tr\d*\.snapchat\.com$/.test((host || '').toLowerCase());
+  }
+
+  const snapchatDetector = {
+    id: 'snapchat',
+    label: 'Snapchat Pixel',
+    permissionOrigins: ['https://tr.snapchat.com/*', 'https://tr6.snapchat.com/*'],
+
+    match(host, pathname) {
+      return isSnapchatHost(host) && /^\/p$/.test(pathname || '');
+    },
+
+    validation: {
+      title: 'Snapchat Pixel',
+      note: 'all fields lower-cased → SHA-256 · phone without +',
+      eventParam: 'ev',
+      hashSlotRe: /^(snap)\[([\w]+)\]$/,
+      fields: {
+        u_hem:  { verifyId: 'v_email',   label: 'Email',       normalize: normTrimLower },
+        u_hpn:  { verifyId: 'v_phone',   label: 'Phone',       normalize: normPhoneNoPlus },
+        u_fn:   { verifyId: 'v_fn',      label: 'First name',  normalize: normTrimLower },
+        u_ln:   { verifyId: 'v_ln',      label: 'Last name',   normalize: normTrimLower },
+        u_age:  { verifyId: 'v_age',     label: 'Age',         normalize: normTrimLower },
+        l_city: { verifyId: 'v_city',    label: 'City',        normalize: normTrimLower },
+        l_gc:   { verifyId: 'v_country', label: 'Country',     normalize: normTrimLower },
+        l_gpc:  { verifyId: 'v_postal',  label: 'Postal code', normalize: normTrimLower },
+        l_gr:   { verifyId: 'v_region',  label: 'Region',      normalize: normTrimLower },
+      },
+      labels: { u_hed: 'Hashed data (u_hed)' },
+    },
+
+    // ctx: { url, host, pathname, queryParams, bodyParams }
+    parse(ctx) {
+      const q = ctx.queryParams || {};
+      const b = ctx.bodyParams || {};
+      const get = (k) => (k in q ? q[k] : (b && k in b ? b[k] : null));
+
+      const pid = get('pid') || get('pids');
+      const ev = get('ev');
+      // The GET event carries both; the POST telemetry beacon carries neither.
+      if (!pid || !ev) return null;
+
+      const identifiers = [];
+      const hashParams = { event: String(ev) };
+      for (const k of Object.keys(SNAP_FIELD)) {
+        const v = get(k);
+        if (v == null || String(v).trim() === '') continue;
+        const def = SNAP_FIELD[k];
+        const hashed = looksHashedSha256(v);
+        const opaque = (k === 'u_hed'); // composite hash, not a single plaintext
+        identifiers.push({
+          field: k, bucket: def.bucket, label: def.label,
+          hashed, plaintext: !hashed && !opaque, masked: false, mask: null, opaque,
+        });
+        hashParams['snap[' + k + ']'] = String(v);
+      }
+
+      const rawVal = get('e_pr');
+      const revenue = (rawVal != null && rawVal !== '')
+        ? { value: String(rawVal), currency: get('e_cur') ? String(get('e_cur')) : null }
+        : null;
+
+      return {
+        provider: 'snapchat',
+        transport: 'standard',
+        event: String(ev),
+        standardEvent: SNAP_STANDARD_EVENTS.has(String(ev).toLowerCase()),
+        providerId: String(pid),
+        identifiers,
+        consent: null,
+        revenue,
+        hashParams,
+      };
+    },
+  };
+
+  // -------------------------------------------------------------------------
+  // Reddit Pixel
+  // -------------------------------------------------------------------------
+  //
+  // A browser pixel hit goes to alb.reddit.com/rp.gif as a GET beacon. The payload
+  // rides in the query string: manually-set hashed em/pn (SHA-256), an opaque
+  // external_id, plus AUTO-collected lists — auto_em is a comma-separated list of
+  // hashed emails, auto_pn a pipe-separated list of '<weight>~<hash>' phones. This
+  // is the ONLY beacon carrying Reddit user identifiers (no separate AM request).
+  // Email is lower/trim → SHA-256; phone is hashed in E.164 WITH the leading '+'.
+  // The auto lists are surfaced as pills (hashed check across every entry) but are
+  // not individually validatable, so they stay out of the validation profile.
+
+  const REDDIT_STANDARD_EVENTS = new Set([
+    'pagevisit', 'viewcontent', 'search', 'addtocart', 'addtowishlist',
+    'purchase', 'lead', 'signup', 'custom',
+  ]);
+
+  function isRedditHost(host) {
+    return (host || '').toLowerCase() === 'alb.reddit.com';
+  }
+
+  function redditSplitList(v, sep) {
+    return (v == null ? '' : String(v)).split(sep).map(s => s.trim()).filter(Boolean);
+  }
+
+  const redditDetector = {
+    id: 'reddit',
+    label: 'Reddit Pixel',
+    permissionOrigins: ['https://alb.reddit.com/*'],
+
+    match(host, pathname) {
+      return isRedditHost(host) && /^\/rp\.gif$/.test(pathname || '');
+    },
+
+    validation: {
+      title: 'Reddit Pixel',
+      note: 'email lower/trim · phone E.164 with + · SHA-256',
+      eventParam: 'event',
+      hashSlotRe: /^(rdt)\[([\w]+)\]$/,
+      fields: {
+        em:          { verifyId: 'v_email', label: 'Email',       normalize: normTrimLower },
+        pn:          { verifyId: 'v_phone', label: 'Phone',       normalize: normPhoneE164 },
+        external_id: { verifyId: 'v_extid', label: 'External ID', normalize: normId, exact: true },
+      },
+      // Auto-collected lists are shown as pills on the card, not validated here.
+      labels: {},
+    },
+
+    // ctx: { url, host, pathname, queryParams, bodyParams }
+    parse(ctx) {
+      const q = ctx.queryParams || {};
+      const b = ctx.bodyParams || {};
+      const get = (k) => (k in q ? q[k] : (b && k in b ? b[k] : null));
+
+      const id = get('id');
+      if (!id) return null; // a pixel hit always carries its account id (a2_…)
+
+      const eventRaw = get('event');
+      const event = eventRaw ? String(eventRaw) : 'PageVisit';
+
+      const identifiers = [];
+      const hashParams = { event };
+
+      const single = (key, bucket, label, opaque) => {
+        const v = get(key);
+        if (v == null || String(v).trim() === '') return;
+        const hashed = looksHashedSha256(v);
+        identifiers.push({
+          field: key, bucket, label, hashed,
+          plaintext: !hashed && !opaque, masked: false, mask: null, opaque: !!opaque,
+        });
+        hashParams['rdt[' + key + ']'] = String(v);
+      };
+      single('em', 'email', 'Email', false);
+      single('pn', 'phone', 'Phone', false);
+      single('external_id', 'externalId', 'External ID', true);
+
+      const autoEm = redditSplitList(get('auto_em'), ',');
+      if (autoEm.length) {
+        const allHashed = autoEm.every(looksHashedSha256);
+        identifiers.push({
+          field: 'auto_em', bucket: 'email', label: 'Auto email ×' + autoEm.length,
+          hashed: allHashed, plaintext: !allHashed, masked: false, mask: null, opaque: false,
+        });
+      }
+      // auto_pn entries are '<weight>~<hash>' — check the hash part.
+      const autoPn = redditSplitList(get('auto_pn'), '|').map(e => {
+        const i = e.indexOf('~');
+        return i > 0 ? e.slice(i + 1) : e;
+      });
+      if (autoPn.length) {
+        const allHashed = autoPn.every(looksHashedSha256);
+        identifiers.push({
+          field: 'auto_pn', bucket: 'phone', label: 'Auto phone ×' + autoPn.length,
+          hashed: allHashed, plaintext: !allHashed, masked: false, mask: null, opaque: false,
+        });
+      }
+
+      // Revenue: m.valueDecimal (comma-decimal, e.g. "12,55") preferred, else m.value.
+      const valDec = get('m.valueDecimal');
+      const val = (valDec != null && valDec !== '') ? valDec : get('m.value');
+      const revenue = (val != null && String(val) !== '')
+        ? { value: String(val), currency: get('m.currency') ? String(get('m.currency')) : null }
+        : null;
+
+      return {
+        provider: 'reddit',
+        transport: 'standard',
+        event,
+        standardEvent: REDDIT_STANDARD_EVENTS.has(event.toLowerCase()),
+        providerId: String(id),
+        identifiers,
+        consent: null,
+        revenue,
+        hashParams,
+      };
+    },
+  };
+
+  // -------------------------------------------------------------------------
   // Registry
   // -------------------------------------------------------------------------
 
-  const registry = [metaDetector, tiktokDetector, pinterestDetector, bingDetector, linkedinDetector];
+  const registry = [metaDetector, tiktokDetector, pinterestDetector, bingDetector, linkedinDetector, snapchatDetector, redditDetector];
 
   root.EcDetectors = {
     registry,
