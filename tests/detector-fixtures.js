@@ -13,6 +13,8 @@ const phE164 = sha256('+4917612345678');           // TikTok/Bing: E.164 with '+
 const fnHash = sha256('markus');
 const lnHash = sha256('baersch');
 const extId  = sha256('crm-88134');                // opaque advertiser id (hashed variant)
+const ageHash = sha256('42');                      // Snapchat hashes the age too
+const cityHash = sha256('berlin');                 // Snapchat hashes geo (l_city)
 
 // One identifier slot in the shape parse() emits.
 function idf(field, bucket, over) {
@@ -89,10 +91,43 @@ const CAPTURES = [
     detectorParams: { 'li[hem]': emHash, event: 'CLICK' },
   }),
 
+  // Snapchat — GET /p event hashing email, phone (no +), name, age and geo.
+  cap({
+    ts: ts(5), method: 'GET',
+    url: 'https://tr.snapchat.com/p', host: 'tr.snapchat.com',
+    provider: 'snapchat', source: 'snapchat', event: 'PURCHASE',
+    providerId: 'a1b2c3d4-0000-1111-2222-333344445555',
+    detectorRevenue: { value: '44.90', currency: 'EUR' },
+    identifiers: [
+      idf('u_hem', 'email'), idf('u_hpn', 'phone'), idf('u_fn', 'firstName'),
+      idf('u_age', 'age'), idf('l_city', 'city'),
+    ],
+    detectorParams: {
+      event: 'PURCHASE',
+      'snap[u_hem]': emHash, 'snap[u_hpn]': phMeta, 'snap[u_fn]': fnHash,
+      'snap[u_age]': ageHash, 'snap[l_city]': cityHash,
+    },
+  }),
+
+  // Reddit — rp.gif Purchase with manual em/pn, auto-collected emails and a
+  // comma-decimal conversion value.
+  cap({
+    ts: ts(6), method: 'GET',
+    url: 'https://alb.reddit.com/rp.gif', host: 'alb.reddit.com',
+    provider: 'reddit', source: 'reddit', event: 'Purchase', providerId: 'a2_abc123',
+    detectorRevenue: { value: '12,55', currency: 'EUR' },
+    identifiers: [
+      idf('em', 'email'), idf('pn', 'phone'),
+      idf('auto_em', 'email', { label: 'Auto email ×2' }),
+      idf('external_id', 'externalId', { opaque: true }),
+    ],
+    detectorParams: { event: 'Purchase', 'rdt[em]': emHash, 'rdt[pn]': phE164, 'rdt[external_id]': extId },
+  }),
+
   // Meta — a PageView leaking the email UNHASHED: the red "raw" pill, the whole
   // point of the tool.
   cap({
-    ts: ts(5),
+    ts: ts(7),
     url: 'https://www.facebook.com/tr/', host: 'www.facebook.com',
     provider: 'meta', source: 'meta', event: 'PageView', providerId: '1004723150984266',
     identifiers: [idf('em', 'email', { hashed: false, plaintext: true })],
