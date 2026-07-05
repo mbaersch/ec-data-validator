@@ -30,6 +30,13 @@ async function generateScreenshots() {
     if (window.chrome && !window.chrome.sidePanel) {
       window.chrome.sidePanel = { setPanelBehavior: () => Promise.resolve() };
     }
+    // The detector toggles reconcile their stored flag against the actual host
+    // permission; in this ephemeral profile no optional origins are granted, so
+    // pretend they are — otherwise the seeded enabledDetectors would be reset to
+    // off and the service filter bar would never render.
+    if (window.chrome && window.chrome.permissions) {
+      window.chrome.permissions.contains = () => Promise.resolve(true);
+    }
   });
   await page.setViewportSize({ width: 420, height: 900 });
 
@@ -83,15 +90,20 @@ async function generateScreenshots() {
 
   // Seed synthetic detector captures into the service worker's state, so the
   // panel renders real provider cards (Meta / TikTok / Pinterest / Bing /
-  // LinkedIn) on the next load. Done after scene 03 so the earlier idle scenes
-  // stay empty.
+  // LinkedIn / Snapchat / Reddit) on the next load. Also flag every detector as
+  // enabled so the per-service filter bar shows above the cards. Done after
+  // scene 03 so the earlier idle scenes stay empty.
   let sw = context.serviceWorkers()[0];
   if (!sw) sw = await context.waitForEvent('serviceworker');
   await sw.evaluate((caps) => {
     // `state` is the service worker's top-level recording state (background.js).
     state.captures = caps;
     state.recording = false;
-    chrome.storage.local.set({ captureState: state });
+    const enabledDetectors = {
+      meta: true, tiktok: true, pinterest: true, bing: true,
+      linkedin: true, snapchat: true, reddit: true
+    };
+    chrome.storage.local.set({ captureState: state, enabledDetectors });
   }, CAPTURES);
 
   // --- 04: Detector capture list — PII-leak detection across ad platforms ---

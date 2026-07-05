@@ -182,7 +182,10 @@ async function generateStoreScreenshots() {
   const storeCss = buildStoreCss(bgDataUri);
 
   async function snap(filename, opts) {
-    const { tabTarget, mockCaptures = null, mockRecording = false, setupFn } = opts;
+    const { tabTarget, mockCaptures = null, mockRecording = false, setupFn, enableDetectors = false } = opts;
+    const enabledDetectors = enableDetectors
+      ? { meta: true, tiktok: true, pinterest: true, bing: true, linkedin: true, snapchat: true, reddit: true }
+      : null;
     const page = await context.newPage();
     await page.addInitScript((data) => {
       if (window.chrome && !window.chrome.sidePanel) {
@@ -209,7 +212,24 @@ async function generateStoreScreenshots() {
           return Promise.resolve({});
         };
       }
-    }, { captures: mockCaptures, recording: mockRecording });
+      // For detector scenes: pretend the host permissions are granted and inject
+      // the enabled-detector flags into the storage read, so the panel renders
+      // the service filter bar deterministically (no race on an async set).
+      if (data && data.enabledDetectors && window.chrome && window.chrome.storage) {
+        if (window.chrome.permissions) {
+          window.chrome.permissions.contains = () => Promise.resolve(true);
+        }
+        const realGet = window.chrome.storage.local.get.bind(window.chrome.storage.local);
+        window.chrome.storage.local.get = function (keys, cb) {
+          const wants = keys === 'enabledDetectors' || keys === null ||
+            (Array.isArray(keys) && keys.includes('enabledDetectors')) ||
+            (keys && typeof keys === 'object' && !Array.isArray(keys) && 'enabledDetectors' in keys);
+          const inject = (res) => { res = res || {}; if (wants) res.enabledDetectors = data.enabledDetectors; return res; };
+          if (typeof cb === 'function') return realGet(keys, (res) => cb(inject(res)));
+          return realGet(keys).then(inject);
+        };
+      }
+    }, { captures: mockCaptures, recording: mockRecording, enabledDetectors });
 
     await page.setViewportSize({ width: VIEW_W, height: VIEW_H });
     await page.goto(popupUrl);
@@ -254,6 +274,7 @@ async function generateStoreScreenshots() {
     tabTarget: 'tab-em',
     mockCaptures: CAPTURES,
     mockRecording: true,
+    enableDetectors: true,
     setupFn: async (p) => {
       await clearDecoder(p);
       await hideIntro(p);
@@ -276,6 +297,7 @@ async function generateStoreScreenshots() {
     tabTarget: 'tab-em',
     mockCaptures: CAPTURES,
     mockRecording: true,
+    enableDetectors: true,
     setupFn: async (p) => {
       await hideIntro(p);
       await p.waitForSelector('.cap-card.source-pinterest');
