@@ -130,6 +130,8 @@ document.addEventListener('DOMContentLoaded', () => {
         { id: 'v_region',  label: 'State',   placeholder: 'BE',     hashKeys: [] },
         { id: 'v_postal',  label: 'Zip',     placeholder: '10115',  hashKeys: [] },
         { id: 'v_country', label: 'Country', placeholder: 'DE',     hashKeys: [] },
+        // Detector-only (Snapchat hashes the age). Lower-cased → SHA-256 like the rest.
+        { id: 'v_age',     label: 'Age',     placeholder: '42',     hashKeys: [] },
         // Opaque advertiser ID (Meta/TikTok external_id). Detector-only; hashed
         // exactly (case-sensitive) via the profile field's exact flag.
         { id: 'v_extid',   label: 'External ID', placeholder: 'CRM-12345', hashKeys: [] }
@@ -1679,6 +1681,8 @@ document.addEventListener('DOMContentLoaded', () => {
         { elId: 'svcPinterest', flag: 'pinterest', origins: ['https://ct.pinterest.com/*'] },
         { elId: 'svcBing',      flag: 'bing',      origins: ['https://bat.bing.com/*', 'https://commerce.bing.com/*'] },
         { elId: 'svcLinkedin',  flag: 'linkedin',  origins: ['https://px.ads.linkedin.com/*', 'https://px4.ads.linkedin.com/*'] },
+        { elId: 'svcSnapchat',  flag: 'snapchat',  origins: ['https://tr.snapchat.com/*', 'https://tr6.snapchat.com/*'] },
+        { elId: 'svcReddit',    flag: 'reddit',    origins: ['https://alb.reddit.com/*'] },
     ];
     let enabledDetectors = {};
 

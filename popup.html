@@ -431,6 +431,20 @@
           <div class="settings-desc">Detect the hashed email in LinkedIn enhanced-conversions requests (<code>px.ads.linkedin.com/wa</code>). Enabling asks for permission to read <code>*.ads.linkedin.com</code> requests; disabling revokes it again. The <code>hem</code> (SHA-256 email) rides in a gzip-compressed POST body, which the panel decodes and validates. Only hits that carry a <code>hem</code> are captured.</div>
         </div>
       </label>
+      <label class="settings-item">
+        <input type="checkbox" id="svcSnapchat">
+        <div class="settings-text">
+          <div class="settings-label">Snapchat Pixel</div>
+          <div class="settings-desc">Detect user data in Snapchat Pixel requests (<code>tr.snapchat.com/p</code>). Enabling asks for permission to read <code>tr.snapchat.com</code> requests; disabling revokes it again. Only the GET tracking beacon carries identifiers — email, phone, name, <strong>age and geo</strong> (<code>u_hem</code>, <code>u_hpn</code>, <code>l_city</code>, …) are all SHA-256 of the lower-cased value; a known field arriving unhashed is flagged as a <strong>plaintext leak</strong>.</div>
+        </div>
+      </label>
+      <label class="settings-item">
+        <input type="checkbox" id="svcReddit">
+        <div class="settings-text">
+          <div class="settings-label">Reddit Pixel</div>
+          <div class="settings-desc">Detect user data in Reddit Pixel requests (<code>alb.reddit.com/rp.gif</code>). Enabling asks for permission to read <code>alb.reddit.com</code> requests; disabling revokes it again. Manually-set (<code>em</code>, <code>pn</code>) and auto-collected (<code>auto_em</code>, <code>auto_pn</code>) advanced-matching are normally SHA-256 hashed — a known field arriving unhashed is flagged as a <strong>plaintext leak</strong>.</div>
+        </div>
+      </label>
     </div>
   </div>
 
