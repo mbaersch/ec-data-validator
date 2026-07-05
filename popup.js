@@ -1343,13 +1343,19 @@ document.addEventListener('DOMContentLoaded', () => {
     function renderFilterBar() {
         const bar = document.getElementById('capFilterBar');
         const present = new Set(captures.map(c => c.source || 'ads'));
-        if (!serviceFilterActive() || present.size === 0) {
+        // Chips reflect every enabled detector PLUS any source already in the ring
+        // — so a just-enabled service shows its chip immediately, before it has
+        // produced a capture, and old captures of a since-disabled service stay
+        // filterable.
+        const enabledIds = Object.keys(enabledDetectors || {}).filter(k => enabledDetectors[k]);
+        const wanted = new Set([...present, ...enabledIds]);
+        if (!serviceFilterActive() || wanted.size === 0) {
             bar.hidden = true;
             bar.innerHTML = '';
             return;
         }
-        const sources = PROVIDER_ORDER.filter(s => present.has(s));
-        present.forEach(s => { if (!PROVIDER_ORDER.includes(s)) sources.push(s); });
+        const sources = PROVIDER_ORDER.filter(s => wanted.has(s));
+        wanted.forEach(s => { if (!PROVIDER_ORDER.includes(s)) sources.push(s); });
         let html = '<span class="cap-filter-label">Show</span>';
         html += '<span class="cap-filter-links"><a class="cap-filter-link" data-flt="all" role="button" tabindex="0">all</a> · <a class="cap-filter-link" data-flt="none" role="button" tabindex="0">none</a></span>';
         html += sources.map(s => {
