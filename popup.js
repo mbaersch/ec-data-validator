@@ -1706,24 +1706,30 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // Initial state pull from background + filter persistence
-    chrome.storage.local.get(['recFilterEm', 'recFilterGa', 'recAutoStop', 'recIncludeSubs', 'recUdIndicator', 'hiddenSources'], (res) => {
-        // Default to true if never set
-        filterEmOnly = (res.recFilterEm === undefined) ? true : !!res.recFilterEm;
-        filterIncludeGa = (res.recFilterGa === undefined) ? true : !!res.recFilterGa;
-        if (Array.isArray(res.hiddenSources)) hiddenSources = new Set(res.hiddenSources);
-        const autoStop = (res.recAutoStop === undefined) ? true : !!res.recAutoStop;
-        includeSubdomains = !!res.recIncludeSubs;
-        const udIndicator = !!res.recUdIndicator;
-        recFilterEm.checked = filterEmOnly;
-        recFilterGa.checked = filterIncludeGa;
-        recAutoStop.checked = autoStop;
-        recIncludeSubs.checked = includeSubdomains;
-        recUdIndicator.checked = udIndicator;
-        sendAutoStopOption(autoStop);
-        chrome.runtime.sendMessage({ type: 'setIndicator', enabled: udIndicator });
-        refreshPermitButton();
-        renderCaptures();
+    // Initial load is split across three independent async sources (persisted
+    // filters, enabled detectors, and the SW's capture state). Each only SETS its
+    // slice of state here; the single coordinated render happens once all three
+    // resolve (see Promise.all below) — so the filter bar and cards never render
+    // against half-loaded state, whichever callback wins the race.
+    const loadFiltersP = new Promise((resolve) => {
+        chrome.storage.local.get(['recFilterEm', 'recFilterGa', 'recAutoStop', 'recIncludeSubs', 'recUdIndicator', 'hiddenSources'], (res) => {
+            // Default to true if never set
+            filterEmOnly = (res.recFilterEm === undefined) ? true : !!res.recFilterEm;
+            filterIncludeGa = (res.recFilterGa === undefined) ? true : !!res.recFilterGa;
+            if (Array.isArray(res.hiddenSources)) hiddenSources = new Set(res.hiddenSources);
+            const autoStop = (res.recAutoStop === undefined) ? true : !!res.recAutoStop;
+            includeSubdomains = !!res.recIncludeSubs;
+            const udIndicator = !!res.recUdIndicator;
+            recFilterEm.checked = filterEmOnly;
+            recFilterGa.checked = filterIncludeGa;
+            recAutoStop.checked = autoStop;
+            recIncludeSubs.checked = includeSubdomains;
+            recUdIndicator.checked = udIndicator;
+            sendAutoStopOption(autoStop);
+            chrome.runtime.sendMessage({ type: 'setIndicator', enabled: udIndicator });
+            refreshPermitButton();
+            resolve();
+        });
     });
 
     // Long-lived port — the SW uses port.onDisconnect to detect panel close
@@ -1803,26 +1809,35 @@ document.addEventListener('DOMContentLoaded', () => {
     // Load persisted flags, each reconciled with its actual permission — if the
     // user revoked a host via Chrome settings, its toggle reflects "off" even
     // though the flag was still stored as on.
-    chrome.storage.local.get('enabledDetectors', async (res) => {
-        enabledDetectors = (res.enabledDetectors && typeof res.enabledDetectors === 'object') ? res.enabledDetectors : {};
-        for (const cfg of DETECTOR_TOGGLES) {
-            const el = document.getElementById(cfg.elId);
-            if (!el) continue;
-            let has = false;
-            try { has = await chrome.permissions.contains({ origins: cfg.origins }); } catch (e) { /* ignore */ }
-            const on = !!enabledDetectors[cfg.flag] && has;
-            if (!!enabledDetectors[cfg.flag] !== on) setDetectorFlag(cfg.flag, on);
-            el.checked = on;
-        }
+    const loadDetectorsP = new Promise((resolve) => {
+        chrome.storage.local.get('enabledDetectors', async (res) => {
+            enabledDetectors = (res.enabledDetectors && typeof res.enabledDetectors === 'object') ? res.enabledDetectors : {};
+            for (const cfg of DETECTOR_TOGGLES) {
+                const el = document.getElementById(cfg.elId);
+                if (!el) continue;
+                let has = false;
+                try { has = await chrome.permissions.contains({ origins: cfg.origins }); } catch (e) { /* ignore */ }
+                const on = !!enabledDetectors[cfg.flag] && has;
+                if (!!enabledDetectors[cfg.flag] !== on) setDetectorFlag(cfg.flag, on);
+                el.checked = on;
+            }
+            resolve();
+        });
     });
 
-    chrome.runtime.sendMessage({ type: 'getState' }, (res) => {
-        if (!res) return;
-        captures = Array.isArray(res.captures) ? res.captures : [];
-        if (res.ringSize) recRing.textContent = String(res.ringSize);
-        setRecordingUI(!!res.recording);
-        renderCaptures();
+    const loadStateP = new Promise((resolve) => {
+        chrome.runtime.sendMessage({ type: 'getState' }, (res) => {
+            if (res) {
+                captures = Array.isArray(res.captures) ? res.captures : [];
+                if (res.ringSize) recRing.textContent = String(res.ringSize);
+                setRecordingUI(!!res.recording);
+            }
+            resolve();
+        });
     });
+
+    // One render, after all three state sources have loaded.
+    Promise.all([loadFiltersP, loadDetectorsP, loadStateP]).then(renderCaptures);
 
     // Pre-fill recUrl with the active tab origin (best effort)
     fillUrlFromActiveTab();

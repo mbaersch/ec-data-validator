@@ -193,3 +193,28 @@ test('13. eme paste: encrypted banner appears, verify block stays hidden', async
   expect(errors).toEqual([]);
   await page.close();
 });
+
+test('14. Service filter bar shows on load when a detector is enabled', async () => {
+  const { page } = await openPopup();
+  // Pretend the Meta host permission is granted (so the toggle reconciliation
+  // keeps the flag on) and persist the enabled flag, then reload so the panel's
+  // init reads both. This reproduces "detector on, panel opened" — the bar must
+  // be visible right after load, not only after a later re-render.
+  await page.addInitScript(() => {
+    if (window.chrome && window.chrome.permissions) {
+      window.chrome.permissions.contains = () => Promise.resolve(true);
+    }
+  });
+  await page.evaluate(() => new Promise((r) => chrome.storage.local.set({ enabledDetectors: { meta: true } }, r)));
+  await page.reload();
+  await page.waitForSelector('.tabs .tab.active');
+
+  await expect(page.locator('#capFilterBar')).toBeVisible();
+  await expect(page.locator('#capFilterBar .cap-filter-chip', { hasText: 'Meta' })).toBeVisible();
+  // all/none quick links are present
+  await expect(page.locator('#capFilterBar .cap-filter-link', { hasText: 'all' })).toBeVisible();
+
+  // Clean up so the seeded flag doesn't leak into other tests sharing the profile.
+  await page.evaluate(() => new Promise((r) => chrome.storage.local.set({ enabledDetectors: {} }, r)));
+  await page.close();
+});
