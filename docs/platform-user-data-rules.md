@@ -1,6 +1,6 @@
 # Plattform-Spezifikationen: User-Daten-Normalisierung & Hashing
 
-Stand: 2026-07-04 (Detektoren live seit v2.7.0)
+Stand: 2026-07-05 (Detektoren live seit v2.7.0; Snapchat + Reddit ab v2.8.0)
 
 Dieses Dokument fasst die Hashing- und Normalisierungsregeln der gaengigen
 Werbeplattform-Conversion-APIs zusammen, vergleicht sie mit den jeweils
@@ -21,6 +21,8 @@ oder PRs gegen die untersuchten Templates.
 | LinkedIn CAPI | `api.linkedin.com/rest/conversionEvents` | SHA256_EMAIL                                       | firstName, lastName, companyName, title, countryCode, IP, AcxiomID, LiveRamp, GoogleAID | n/a (kein Phone)      | n/a                 | nicht im Schema |
 | Pinterest CAPI | `api.pinterest.com/.../events`     | em, ph, ge, db, ln, fn, ct, st, zp, country, hashed_maids, external_id | client_ip_address, client_user_agent, click_id           | Ziffern **ohne `+`**  | **entfernt**        | nicht im Schema |
 | Microsoft CAPI | `capi.uet.microsoft.com/v1/{tagID}/events` | em, ph                                          | clientIpAddress, clientUserAgent, msclkid, anonymousId, externalId, idfa, gaid | E.164 mit `+`         | n/a                 | nicht im Schema |
+| Snapchat Pixel | `tr.snapchat.com/p` (GET-Beacon)  | u_hem, u_hpn, u_fn, u_ln, **u_age**, l_city, l_gc, l_gpc, l_gr | — (POST `/p` = Telemetrie, ignoriert)          | Ziffern **ohne `+`**  | **bleiben** (nur lowercase) | n/a |
+| Reddit Pixel | `alb.reddit.com/rp.gif` (GET-Beacon) | em, pn, external_id, auto_em, auto_pn          | —                                                        | E.164 mit `+`         | n/a                 | n/a |
 
 Email-Normalisierung divergiert kraeftiger als oben darstellbar; Detail in
 den jeweiligen Abschnitten.
@@ -380,19 +382,79 @@ wie CAPI.
 
 ---
 
+## Snapchat — Pixel (Browser)
+
+Kein Server-CAPI hier untersucht; die Extension liest den **Browser-Pixel** auf
+`tr.snapchat.com/p`. Nur die **GET** `/p` traegt Identifier — die POST `/p` ist
+reine Telemetrie ohne PII und wird ignoriert (das Verlangen von `pid`+`ev`
+schliesst sie sauber aus). Normalisierung durchgehend **nur lowercase**
+(verifiziert an `u_fn`/`u_age`/`l_*`); Telefon **ohne** `+`.
+
+### Felder & Regeln
+
+| Feld     | Bucket     | Hashed? | Normalisierung                                                                 |
+|----------|------------|---------|--------------------------------------------------------------------------------|
+| `u_hem`  | Email      | SHA256  | `trim().toLowerCase()`.                                                         |
+| `u_hpn`  | Phone      | SHA256  | Ziffern, **ohne `+`**.                                                          |
+| `u_fn`   | First name | SHA256  | nur lowercase (Punktuation bleibt, anders als Meta/Google).                    |
+| `u_ln`   | Last name  | SHA256  | nur lowercase.                                                                  |
+| `u_age`  | Age        | SHA256  | Ziffern-String, lowercase (No-op).                                             |
+| `l_city` | City       | SHA256  | nur lowercase (**Spaces bleiben**).                                            |
+| `l_gc`   | Country    | SHA256  | lowercase.                                                                      |
+| `l_gpc`  | Postal     | SHA256  | lowercase.                                                                      |
+| `l_gr`   | Region     | SHA256  | lowercase.                                                                      |
+| `u_hed`  | Composite  | SHA256  | abgeleiteter Kombi-Hash, kein einzelner Klartext → hash-only, nicht validierbar. |
+
+Snapchat hasht also **auch Geo und Alter**. E-Commerce in `e_*`, Dedup via
+`cdid`, Pixel-ID in `pid`/`pids`, Event in `ev`.
+
+Quelle: `tracking-auditor-extension/lib/snapchat.js` + beobachtete
+`tr.snapchat.com/p`-Requests. Verifiziert: `sha256("test@example.com")` →
+`973dfe46…`.
+
+---
+
+## Reddit — Pixel (Browser)
+
+Browser-Pixel auf `alb.reddit.com/rp.gif` (GET-Beacon). Das ist der **einzige**
+Beacon mit User-Identifiern (kein separater Advanced-Matching-Request). Email
+`trim().toLowerCase()`, Telefon **E.164 mit `+`** (anders als Meta/Pinterest,
+die ohne `+` hashen).
+
+### Felder & Regeln
+
+| Feld          | Bucket      | Hashed? | Normalisierung                                          |
+|---------------|-------------|---------|---------------------------------------------------------|
+| `em`          | Email       | SHA256  | `trim().toLowerCase()`.                                 |
+| `pn`          | Phone       | SHA256  | E.164 **mit `+`**.                                      |
+| `external_id` | External ID | SHA256  | opak (exact/case-preserving), nie als Leak markiert.    |
+| `auto_em`     | Email       | SHA256  | **Komma-Liste** auto-erfasster Hashes.                  |
+| `auto_pn`     | Phone       | SHA256  | **Pipe-Liste** `gewicht~hash` auto-erfasster Hashes.    |
+
+Conversion/Metadaten in `m.*`; `m.valueDecimal` ist **Komma-Dezimal** (z. B.
+`12,55`). Account-/Pixel-ID `id` (Format `a2_…`), Event in `event` (Default
+`PageVisit`). Die Auto-Listen erscheinen als Card-Pills, werden aber nicht
+einzeln validiert (Listen statt Einzel-Slots).
+
+Quelle: `tracking-auditor-extension/lib/reddit.js` + beobachtete
+`rp.gif`-Requests.
+
+---
+
 ## Implikationen fuer die Extension
 
-**Status (v2.7.0):** Die Extension validiert nicht mehr nur Google-EC. Fuenf
+**Status (v2.8.0):** Die Extension validiert nicht mehr nur Google-EC. Sieben
 **client-seitige PII-Leak-Detektoren** sind umgesetzt — Meta Pixel, TikTok
-Pixel, Pinterest, Bing UET und LinkedIn Insight Tag — als optionale,
-default-off Dienste (`detectors.js`, provider-agnostische Registry). Sie lesen
-die **Browser-Pixel-Requests** (nicht die hier dokumentierten Server-CAPIs),
-verwenden aber genau die unten aufgefuehrten Normalisierungs- und
-Hash-Regeln. Die pro-Plattform-Divergenzen sind damit produktiv relevant:
+Pixel, Pinterest, Bing UET, LinkedIn Insight Tag, Snapchat Pixel und Reddit
+Pixel — als optionale, default-off Dienste (`detectors.js`, provider-agnostische
+Registry). Sie lesen die **Browser-Pixel-Requests** (nicht die hier
+dokumentierten Server-CAPIs), verwenden aber genau die oben aufgefuehrten
+Normalisierungs- und Hash-Regeln. Die pro-Plattform-Divergenzen sind damit
+produktiv relevant:
 
-1. **Phone `+` vs. ohne:** Meta + Pinterest ohne `+`, TikTok + Bing als E.164
-   mit `+`. In den Detektoren als `normPhone` (ohne `+`) bzw. `normPhoneE164`
-   (mit `+`) abgebildet.
+1. **Phone `+` vs. ohne:** Meta + Pinterest + **Snapchat** ohne `+`, TikTok +
+   Bing + **Reddit** als E.164 mit `+`. In den Detektoren als `normPhone` /
+   `normPhoneNoPlus` (ohne `+`) bzw. `normPhoneE164` (mit `+`) abgebildet.
 2. **Email-Spaces:** Pinterest strippt alle Leerzeichen (`normEmailNoSpace`),
    die anderen nur `trim().toLowerCase()`.
 3. **Multi-Algo:** Pinterest akzeptiert SHA-256/SHA-1/MD5 — der Algorithmus
