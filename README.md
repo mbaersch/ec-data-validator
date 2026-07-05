@@ -58,15 +58,17 @@ Use it to verify that ec tracking is working and the data leaving the browser ac
 
 **PII-leak detectors for non-Google ad platforms** (optional, all default-off):
 
-Beyond Google Ads / GA4, the extension can flag when personal data leaves the browser toward other advertising services — useful to check that identifiers are actually **hashed** (and correctly normalized) before they go out, and to catch **plaintext leaks**. Five detectors ship:
+Beyond Google Ads / GA4, the extension can flag when personal data leaves the browser toward other advertising services — useful to check that identifiers are actually **hashed** (and correctly normalized) before they go out, and to catch **plaintext leaks**. Seven detectors ship:
 
 - **Meta Pixel** — advanced-matching fields (`ud[em]`, `ud[ph]`, `ud[fn]`, …) on `facebook.com` / `connect.facebook.net`
 - **TikTok Pixel** — the nested `context.user` object (`email`, `phone`, …) on `analytics.tiktok.com`
 - **Pinterest** — the `pd` enhanced-match payload (JSON or `pd[em]` bracket form) on `ct.pinterest.com`
 - **Bing UET** — the `pid` sub-querystring (`em`, `ph`, `fn`, `ln`) on `bat.bing.com` / `commerce.bing.com`
 - **LinkedIn Insight Tag** — the hashed email (`hem`) that rides in the gzip-compressed `/wa/` POST on `px.ads.linkedin.com` (the panel decodes `base64(gzip(JSON))` transparently)
+- **Snapchat Pixel** — the GET `/p` tracking beacon on `tr.snapchat.com`, hashing email, phone, name plus **age and geo** (`u_hem`, `u_hpn`, `u_age`, `l_city`, …); the POST telemetry beacon carries no identifiers and is ignored
+- **Reddit Pixel** — the `rp.gif` beacon on `alb.reddit.com`, with manual (`em`, `pn`) and **auto-collected** (`auto_em` comma list, `auto_pn` `weight~hash` pipe list) advanced matching plus an opaque `external_id`
 
-Each detector is enabled individually in the **Settings** tab. Enabling one triggers a **runtime permission request** for just that service's origins (via `optional_host_permissions`, so the installed manifest never changes); disabling revokes it again. Captured requests appear in the same clickable card list, each **tinted per provider** (Meta cool-blue, TikTok fuchsia, Pinterest red, Bing teal, LinkedIn azure) so the source is obvious at a glance.
+Each detector is enabled individually in the **Settings** tab. Enabling one triggers a **runtime permission request** for just that service's origins (via `optional_host_permissions`, so the installed manifest never changes); disabling revokes it again. Captured requests appear in the same clickable card list, each leading with a **service-name pill** and **tinted per provider** (Meta cool-blue, TikTok fuchsia, Pinterest red, Bing teal, LinkedIn azure, Snapchat yellow, Reddit orangered) so the source is obvious at a glance. Google Ads — the focus of the tool — stays a plain card with just a neutral grey rail. Once at least one non-Google detector is enabled, a **per-service filter bar** appears above the card list to show/hide each service (with `all` / `none` shortcuts).
 
 - **Leak flagging**: a known identifier field arriving **unhashed** (plaintext) is called out as a leak. Hashed fields show a neutral identifier pill.
 - **Hash validation with normalization diagnostics**: click a card to load its hash slots into the shared PII Parameters field, then enter the known plaintext. The match is **case-sensitive** and reports three states — a clean **MATCH** (green), **MATCH + INPUT NORMALIZED** (your input was looser than the canonical form, e.g. `UPPERCASE` or a `0049…` phone — the tool normalized it for you), and **MATCH + RAW · NOT NORMALIZED** (orange): the hash reproduces from your *raw* input, which means the tag hashed an un-normalized value that will **not** match on the platform side — a real implementation defect the green states would otherwise hide.
@@ -75,7 +77,7 @@ Each detector is enabled individually in the **Settings** tab. Enabling one trig
 - **Bing e-commerce**: a Bing custom event (`evt=custom`) is surfaced by its real action from `ea` (`purchase`, `refund`, `add_to_cart`, …) instead of a flat "custom", and its conversion value (`ecomm_totalvalue` / `gv`, plus currency) is shown as a value pill on the card.
 
 <!-- Regenerate with `npm run screenshots`. -->
-<img width="420" alt="PII-leak detection across Meta, TikTok, Pinterest, Bing and LinkedIn — one card flagged with an unhashed-email leak, another surfacing a Bing purchase value" src="screenshots/04-detectors.png" />
+<img width="420" alt="PII-leak detection across Meta, TikTok, Pinterest, Bing, LinkedIn, Snapchat and Reddit — a service filter bar on top, each card led by a provider pill, one flagged with an unhashed-email leak" src="screenshots/04-detectors.png" />
 
 ## Install
 
@@ -145,7 +147,7 @@ The codebase is small and unbundled — no build step. Edit, reload the extensio
 - `manifest.json` — MV3 config
 - `background.js` — service worker, handles recording and the message API
 - `popup.html` / `popup.js` — Side Panel UI
-- `detectors.js` — provider-agnostic registry for the non-Google PII-leak detectors (Meta / TikTok / Pinterest / Bing / LinkedIn); loaded by the service worker via `importScripts` and by the panel
+- `detectors.js` — provider-agnostic registry for the non-Google PII-leak detectors (Meta / TikTok / Pinterest / Bing / LinkedIn / Snapchat / Reddit); loaded by the service worker via `importScripts` and by the panel
 
 For diagnostic helpers in the service worker console (`chrome://extensions/` → click "Service worker"):
 
@@ -160,6 +162,12 @@ lightTest()          // 30s diagnostic listener that logs every match
 ```
 
 ## Changelog
+
+### v2.8.0
+
+- **Two more PII-leak detectors: Snapchat Pixel and Reddit Pixel** (opt-in, default-off, ported from the sibling tracking-auditor extension). **Snapchat** (`tr.snapchat.com/p`) surfaces the GET tracking beacon — email, phone, name plus hashed **age and geo** (`u_hem`, `u_hpn`, `u_age`, `l_city`, …), all lower-cased → SHA-256, phone without `+`; requiring `pid`+`ev` cleanly ignores the POST telemetry beacon. **Reddit** (`alb.reddit.com/rp.gif`) handles manual `em`/`pn`, an opaque `external_id`, and the auto-collected `auto_em` (comma) / `auto_pn` (`weight~hash` pipe) lists, with `m.valueDecimal` (comma-decimal) as the conversion value. Both go through `optional_host_permissions` + a runtime request, so the installed manifest and the Web Store review state are unchanged.
+- **Service-name pill + per-service filter.** Every capture card now leads with a **provider pill** (brand-coloured), and Snapchat (yellow) / Reddit (orangered) join the per-provider card tints. **Google Ads stays a plain white card** — it remains the tool's focus — with just a neutral grey rail. A **filter bar** appears above the card list once at least one non-Google detector is enabled, letting you show/hide each service (with `all` / `none` shortcuts).
+- **Fix — detector hosts never leak into the Google path.** Reddit/Snapchat send bare `em`/`pn` params that collide with Google's own `em`; with `<all_urls>` optionally granted, a request to a detector endpoint whose detector was toggled *off* used to be mis-captured as a bogus Google "em" card. A known detector endpoint is now only ever captured by its (enabled) detector, otherwise dropped.
 
 ### v2.7.0
 
