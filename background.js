@@ -667,6 +667,12 @@ function handleRequest(details) {
     }
     return;
   }
+  // A request to a known detector endpoint whose detector is currently disabled
+  // must never fall through to the Google first-party path: Reddit/Snapchat send
+  // bare em/pn params that would otherwise be captured as a bogus Google "em"
+  // card (visible, "no identifiers", not validatable). If the user wants these
+  // tracked, they enable the toggle; if not, we drop them here.
+  if (EcDetectors.matchesKnownHost(host, pathname)) return;
 
   const transport = isGoogleHost(host) ? 'google' : 'first-party';
 

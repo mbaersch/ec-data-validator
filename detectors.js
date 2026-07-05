@@ -977,6 +977,14 @@
       }
       return null;
     },
+    // Does this host+path belong to ANY known detector, regardless of whether the
+    // detector is currently enabled? Used by the capture pipeline to make sure a
+    // request to a detector endpoint is never mis-handled by the Google path when
+    // its detector is off — Reddit/Snapchat reuse bare em/pn param names that
+    // would otherwise surface as a bogus Google "em" capture.
+    matchesKnownHost(host, pathname) {
+      return registry.some(d => d.match(host, pathname));
+    },
     // Origins the panel needs to request/remove when a detector is toggled.
     permissionOrigins(id) {
       const d = this.byId(id);
