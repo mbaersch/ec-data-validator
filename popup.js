@@ -1006,6 +1006,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let filterEmOnly = true;
     let filterIncludeGa = true;
     let includeSubdomains = false;
+    // Per-service hide set for the card filter bar (source keys, e.g. 'meta').
+    let hiddenSources = new Set();
 
     function normalizeOrigin(input) {
         if (!input) return null;
@@ -1307,11 +1309,64 @@ document.addEventListener('DOMContentLoaded', () => {
         return `<div class="cap-card-conv">${segs.join('<span class="conv-sep">·</span>')}</div>`;
     }
 
+    // Service (source key) → display label. Detector captures carry their id as
+    // source; Google captures carry 'ads' / 'ga'.
+    const PROVIDER_LABEL = {
+        ads: 'Google Ads', ga: 'GA4', meta: 'Meta', tiktok: 'TikTok', bing: 'Bing',
+        pinterest: 'Pinterest', linkedin: 'LinkedIn', snapchat: 'Snapchat', reddit: 'Reddit'
+    };
+    const PROVIDER_ORDER = ['ads', 'ga', 'meta', 'tiktok', 'pinterest', 'bing', 'linkedin', 'snapchat', 'reddit'];
+    function providerLabel(src) { return PROVIDER_LABEL[src] || src; }
+
+    // The service-name pill — always the first pill on every card.
+    function providerPill(src) {
+        const label = providerLabel(src);
+        return `<span class="cap-pill provider-${escapeHtml(src)}" title="Service: ${escapeHtml(label)}">${escapeHtml(label)}</span>`;
+    }
+
+    // Per-service show/hide bar above the card list. Only shown once at least one
+    // additional (non-Google) detector service is enabled — otherwise the single
+    // Google-Ads focus needs no service filter. Chips reflect the services that
+    // actually appear in the current captures.
+    function renderFilterBar() {
+        const bar = document.getElementById('capFilterBar');
+        const anyDetector = !!(enabledDetectors && Object.values(enabledDetectors).some(Boolean));
+        const present = new Set(captures.map(c => c.source || 'ads'));
+        if (!anyDetector || present.size === 0) {
+            bar.hidden = true;
+            bar.innerHTML = '';
+            return;
+        }
+        const sources = PROVIDER_ORDER.filter(s => present.has(s));
+        present.forEach(s => { if (!PROVIDER_ORDER.includes(s)) sources.push(s); });
+        let html = '<span class="cap-filter-label">Show</span>';
+        html += sources.map(s => {
+            const active = !hiddenSources.has(s);
+            return `<span class="cap-filter-chip ${active ? 'active' : ''}" data-src="${escapeHtml(s)}" role="button" tabindex="0" aria-pressed="${active}">${escapeHtml(providerLabel(s))}</span>`;
+        }).join('');
+        bar.innerHTML = html;
+        bar.hidden = false;
+        bar.querySelectorAll('.cap-filter-chip').forEach(chip => {
+            const toggle = () => {
+                const s = chip.dataset.src;
+                if (hiddenSources.has(s)) hiddenSources.delete(s); else hiddenSources.add(s);
+                chrome.storage.local.set({ hiddenSources: [...hiddenSources] });
+                renderCaptures();
+            };
+            chip.addEventListener('click', toggle);
+            chip.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
+            });
+        });
+    }
+
     function renderCaptures() {
+        renderFilterBar();
         recCount.textContent = captures.length;
         const visible = captures.filter(c => {
             if (filterEmOnly && !captureHasUserData(c)) return false;
             if (!filterIncludeGa && (c.source || 'ads') === 'ga') return false;
+            if (hiddenSources.has(c.source || 'ads')) return false;
             return true;
         });
         if (visible.length === 0) {
@@ -1335,9 +1390,9 @@ document.addEventListener('DOMContentLoaded', () => {
             const hasIdentifier = captureHasUserData(c);
             const transport = c.transport || 'google';
             const source = c.source || 'ads';
-            const pills = isDetector
+            const pills = providerPill(source) + (isDetector
                 ? renderDetectorPills(c.identifiers)
-                : `${customLoaderPill(c)}${renderPills(c.em, c.eme, c.userData)}${consentMarkerPill(c.consent)}`;
+                : `${customLoaderPill(c)}${renderPills(c.em, c.eme, c.userData)}${consentMarkerPill(c.consent)}`);
             const convLine = isDetector ? renderDetectorEventLine(c) : renderConversionLine(c.conversion);
             return `<div class="cap-card ${hasIdentifier ? '' : 'no-em'} source-${source} transport-${transport}" data-idx="${realIdx}">
                 <button class="cap-detail-btn" data-detail-idx="${realIdx}" aria-label="Show details" title="Show details — tip: Ctrl/⌘+click anywhere on the card opens this too">i</button>
@@ -1621,10 +1676,11 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // Initial state pull from background + filter persistence
-    chrome.storage.local.get(['recFilterEm', 'recFilterGa', 'recAutoStop', 'recIncludeSubs', 'recUdIndicator'], (res) => {
+    chrome.storage.local.get(['recFilterEm', 'recFilterGa', 'recAutoStop', 'recIncludeSubs', 'recUdIndicator', 'hiddenSources'], (res) => {
         // Default to true if never set
         filterEmOnly = (res.recFilterEm === undefined) ? true : !!res.recFilterEm;
         filterIncludeGa = (res.recFilterGa === undefined) ? true : !!res.recFilterGa;
+        if (Array.isArray(res.hiddenSources)) hiddenSources = new Set(res.hiddenSources);
         const autoStop = (res.recAutoStop === undefined) ? true : !!res.recAutoStop;
         includeSubdomains = !!res.recIncludeSubs;
         const udIndicator = !!res.recUdIndicator;
@@ -1708,6 +1764,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 setDetectorFlag(cfg.flag, false);
                 try { await chrome.permissions.remove({ origins: cfg.origins }); } catch (e) { /* ignore */ }
             }
+            // The service filter bar appears once any detector is enabled.
+            renderCaptures();
         });
     });
 

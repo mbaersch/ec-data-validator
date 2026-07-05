@@ -21,6 +21,8 @@
       --card-pinterest: #fef2f2;
       --card-bing: #ecfdf6;
       --card-linkedin: #e7f3fb;
+      --card-snapchat: #fef8d9;
+      --card-reddit: #ffe8de;
       --text: #1e293b;
       --text-muted: #64748b;
       --text-faint: #94a3b8;
@@ -52,6 +54,8 @@
       --card-pinterest: #2a1a1c;
       --card-bing: #16282a;
       --card-linkedin: #16222e;
+      --card-snapchat: #33300d;
+      --card-reddit: #34190f;
       --text: #e2e8f0;
       --text-muted: #94a3b8;
       --text-faint: #64748b;
@@ -204,6 +208,31 @@
     .cap-card.source-pinterest { border-left: 3px solid #e60023; padding-left: 8px; background: var(--card-pinterest); }
     .cap-card.source-bing { border-left: 3px solid #0a8a8a; padding-left: 8px; background: var(--card-bing); }
     .cap-card.source-linkedin { border-left: 3px solid #0a66c2; padding-left: 8px; background: var(--card-linkedin); }
+    .cap-card.source-snapchat { border-left: 3px solid #eab308; padding-left: 8px; background: var(--card-snapchat); }
+    .cap-card.source-reddit { border-left: 3px solid #ff4500; padding-left: 8px; background: var(--card-reddit); }
+    /* Google Ads is the focus topic — it keeps a plain (white) card, just a
+       neutral grey rail so every card reads as "bordered". */
+    .cap-card.source-ads { border-left: 3px solid #94a3b8; padding-left: 8px; }
+
+    /* Service-name pill — always the first pill on a card. Brand colours mirror
+       the sibling tracking-auditor extension so a mixed stream scans the same. */
+    .cap-pill.provider-ads       { background: #e2e8f0; color: #475569; }
+    .cap-pill.provider-ga        { background: #e37400; color: #fff; }
+    .cap-pill.provider-meta      { background: #1877f2; color: #fff; }
+    .cap-pill.provider-tiktok    { background: #010101; color: #25f4ee; }
+    .cap-pill.provider-bing      { background: #0a8a8a; color: #fff; }
+    .cap-pill.provider-pinterest { background: #e60023; color: #fff; }
+    .cap-pill.provider-linkedin  { background: #0a66c2; color: #fff; }
+    .cap-pill.provider-reddit    { background: #ff4500; color: #fff; }
+    .cap-pill.provider-snapchat  { background: #fffc00; color: #111; }
+
+    /* Per-service show/hide bar above the card list — only shown once at least
+       one additional (non-Google) detector service is enabled. */
+    .cap-filter-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 0 0 8px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+    .cap-filter-bar .cap-filter-label { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.3px; color: var(--text-muted); margin-right: 2px; }
+    .cap-filter-chip { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.3px; padding: 2px 7px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface-alt); color: var(--text-muted); cursor: pointer; user-select: none; }
+    .cap-filter-chip.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+    .cap-filter-chip:hover { border-color: var(--primary); }
 
     /* Detector validation renders in the em result area (same place as the
        Google em result). */
@@ -315,6 +344,7 @@
   </div>
   <div id="emResult"></div>
 
+  <div id="capFilterBar" class="cap-filter-bar" hidden></div>
   <div id="capList" class="cap-list" hidden></div>
   <div id="capEmpty" class="cap-empty">No captures yet — start recording to collect requests.</div>
 </div>
