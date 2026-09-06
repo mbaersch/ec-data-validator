@@ -67,6 +67,13 @@
   // phone in E.164 digits WITHOUT the leading '+'. Used by Snapchat, which hashes
   // the number without the plus (and otherwise only lower-cases).
   function normPhoneNoPlus(v) { return normPhoneE164(v).replace(/^\+/, ''); }
+  // name: lowercase, strip whitespace and ASCII punctuation, keep everything else.
+  // Used by OpenAI. Differs from normLettersLower in that digits survive — the
+  // four ranges are the printable non-alphanumeric ASCII blocks.
+  function normNameKeepUnicode(v) {
+    return String(v).toLowerCase()
+      .replace(/[\s!-/:-@[-`{-~]/g, '');
+  }
 
   // UTF-8-safe base64 decode (for the base64-in-querystring GET transport).
   // atob + TextDecoder both exist in the service worker and the panel.
@@ -957,10 +964,256 @@
   };
 
   // -------------------------------------------------------------------------
+  // OpenAI Ad Measurement Pixel (oaiq)
+  // -------------------------------------------------------------------------
+  //
+  // A browser hit goes to POST https://bzr.openai.com/v1/sdk/events with a JSON
+  // body sent as text/plain; the pixel id rides in the QUERY (?pid=…), not the
+  // body. Two things make this pixel different from every other one here:
+  //
+  //   1. The user block is nested BY ORIGIN: user.in is what the site passed to
+  //      oaiq('init', {user}), while user.fm / user.js / user.ht are values the
+  //      SDK scraped off the page itself (automatic advanced matching, from form
+  //      fields / JS variables / HTML). We keep that split — it is the difference
+  //      between "the site chose to send this" and "the SDK collected it", and a
+  //      mismatch between in.em and fm.em means the two disagree about who the
+  //      user is. Hence slots like oai[in.em] / oai[fm.em] rather than a merged em.
+  //   2. The geo fields (co/ct/rg/pc) travel in CLEARTEXT by design. They are
+  //      flagged neutrally, never as a leak.
+  //
+  // One request is normally a BATCH of events, and two internal event types ride
+  // the same transport: openai::sdk_init and oai::diagnostic. The diagnostic is
+  // the pixel's own QA — it reports the consent state, the account's automatic-
+  // advanced-matching setting and how many calls the SDK dropped as invalid.
+  //
+  // Source: docs 2026-09-01-openai-pixel-reference.md (read out of oaiq.min.js
+  // v0.1.32 plus live captures).
+
+  const OAI_BLOCK = { in: 'init', fm: 'form', js: 'JS', ht: 'HTML' };
+
+  const OAI_FIELD = {
+    em:  { bucket: 'email',      label: 'Email',       verifyId: 'v_email', normalize: normTrimLower },
+    ph:  { bucket: 'phone',      label: 'Phone',       verifyId: 'v_phone', normalize: normPhone },
+    fn:  { bucket: 'firstName',  label: 'First name',  verifyId: 'v_fn',    normalize: normNameKeepUnicode },
+    ln:  { bucket: 'lastName',   label: 'Last name',   verifyId: 'v_ln',    normalize: normNameKeepUnicode },
+    eid: { bucket: 'externalId', label: 'External ID', verifyId: 'v_extid', normalize: normId, exact: true, opaque: true },
+    // Cleartext by design — shown, never validated, never a leak.
+    co:  { bucket: 'country',    label: 'Country',     cleartext: true },
+    ct:  { bucket: 'city',       label: 'City',        cleartext: true },
+    rg:  { bucket: 'region',     label: 'Region',      cleartext: true },
+    pc:  { bucket: 'postal',     label: 'Postal code', cleartext: true },
+  };
+
+  // The validation profile's field map is one entry per block × field, because
+  // the same identifier can arrive several times with DIFFERENT values (site vs.
+  // scraped). Built here rather than written out to keep the four blocks in sync.
+  const oaiFields = {};
+  const oaiLabels = {};
+  for (const blk of Object.keys(OAI_BLOCK)) {
+    for (const key of Object.keys(OAI_FIELD)) {
+      const def = OAI_FIELD[key];
+      const label = def.label + ' (' + OAI_BLOCK[blk] + ')';
+      if (def.cleartext) oaiLabels[blk + '.' + key] = label;
+      else oaiFields[blk + '.' + key] = {
+        verifyId: def.verifyId, label, normalize: def.normalize, exact: !!def.exact,
+      };
+    }
+  }
+
+  const OAI_STANDARD_EVENTS = new Set([
+    'order_created', 'items_added', 'checkout_started',
+    'page_viewed', 'contents_viewed',
+    'lead_created', 'registration_completed', 'appointment_scheduled',
+    'subscription_created', 'trial_started',
+    'custom',
+  ]);
+
+  // Internal event types that share the transport with real ones. They are not
+  // marketing events and must not be counted as such.
+  function isOaiInternalEvent(type) {
+    return typeof type === 'string' && (type.startsWith('openai::') || type.startsWith('oai::'));
+  }
+
+  // `amount` is an integer in the currency's SMALLEST unit, so the exponent is a
+  // property of the currency — dividing by 100 unconditionally invents a 100×
+  // error on JPY/KRW/… and a 10× one on the three-decimal currencies.
+  const OAI_ZERO_DECIMAL = new Set([
+    'BIF', 'CLP', 'DJF', 'GNF', 'ISK', 'JPY', 'KMF', 'KRW', 'MGA',
+    'PYG', 'RWF', 'UGX', 'UYI', 'VND', 'VUV', 'XAF', 'XOF', 'XPF',
+  ]);
+  const OAI_THREE_DECIMAL = new Set(['BHD', 'IQD', 'JOD', 'KWD', 'LYD', 'OMR', 'TND']);
+
+  function oaiMajorUnits(amount, currency) {
+    const n = Number(amount);
+    if (!Number.isFinite(n)) return null;
+    // No currency, no exponent — showing the raw minor-unit integer is honest,
+    // guessing 1/100 is not.
+    if (!currency) return String(amount);
+    const c = String(currency).toUpperCase();
+    if (OAI_ZERO_DECIMAL.has(c)) return String(n);
+    if (OAI_THREE_DECIMAL.has(c)) return (n / 1000).toFixed(3);
+    return (n / 100).toFixed(2);
+  }
+
+  function isOpenaiHost(host) {
+    return (host || '').toLowerCase() === 'bzr.openai.com';
+  }
+
+  // background.js's extractAllParams JSON.stringifies nested body values, so
+  // `events` and `user` arrive as strings here; a direct object is accepted too.
+  function oaiJson(v) {
+    if (v == null) return null;
+    if (typeof v === 'object') return v;
+    try { return JSON.parse(String(v)); } catch (e) { return null; }
+  }
+
+  function oaiEventLabel(ev) {
+    const type = ev && ev.type != null ? String(ev.type) : null;
+    if (!type) return null;
+    if (type === 'custom' && ev.custom_event_name) return 'custom: ' + String(ev.custom_event_name);
+    return type;
+  }
+
+  const openaiDetector = {
+    id: 'openai',
+    label: 'OpenAI Pixel',
+    permissionOrigins: ['https://bzr.openai.com/*'],
+
+    match(host, pathname) {
+      return isOpenaiHost(host) && /^\/v1\/sdk\/events\/?$/.test(pathname || '');
+    },
+
+    validation: {
+      title: 'OpenAI Ad Measurement Pixel',
+      note: 'email lower/trim · phone digits, no leading 0 · name lower, no spaces/ASCII punctuation · SHA-256 · in = site-supplied, fm/js/ht = scraped by the SDK',
+      eventParam: 'event',
+      hashSlotRe: /^(oai)\[([\w.]+)\]$/,
+      fields: oaiFields,
+      labels: oaiLabels,
+      // Slots the provider deliberately sends unhashed. The panel marks these
+      // instead of leaving the reader guessing why a value has no hash.
+      cleartextSlots: new Set(Object.keys(oaiLabels)),
+    },
+
+    // ctx: { url, host, pathname, queryParams, bodyParams }
+    parse(ctx) {
+      const q = ctx.queryParams || {};
+      const b = ctx.bodyParams || {};
+
+      const pid = q.pid != null && q.pid !== '' ? String(q.pid) : null;
+      if (!pid) return null; // every batch carries its pixel id in the query
+
+      const events = oaiJson(b.events);
+      const list = Array.isArray(events) ? events : [];
+      const marketing = list.filter(e => e && !isOaiInternalEvent(e.type));
+      const diagnostic = list.find(e => e && e.type === 'oai::diagnostic') || null;
+
+      // Event line: the real events, or — for an internal-only batch — the
+      // internal type, so a diagnostic-only request is still recognisable.
+      let event = null;
+      const names = [];
+      for (const e of marketing) {
+        const n = oaiEventLabel(e);
+        if (n && !names.includes(n)) names.push(n);
+      }
+      if (names.length) {
+        event = names.slice(0, 3).join(' · ') + (names.length > 3 ? ' +' + (names.length - 3) : '');
+      } else if (list.length) {
+        event = oaiEventLabel(list[0]);
+      }
+
+      const user = oaiJson(b.user);
+      const identifiers = [];
+      const hashParams = {};
+      if (event) hashParams.event = event;
+
+      if (user && typeof user === 'object' && !Array.isArray(user)) {
+        for (const blk of Object.keys(OAI_BLOCK)) {
+          const block = user[blk];
+          if (!block || typeof block !== 'object' || Array.isArray(block)) continue;
+          for (const key of Object.keys(OAI_FIELD)) {
+            const def = OAI_FIELD[key];
+            const raw = block[key];
+            if (raw == null) continue;
+            // em/ph arrive as ARRAYS in the scraped blocks, single values in `in`.
+            const vals = (Array.isArray(raw) ? raw : [raw])
+              .filter(v => v != null && String(v).trim() !== '')
+              .map(v => String(v));
+            if (!vals.length) continue;
+
+            const slot = blk + '.' + key;
+            const count = vals.length > 1 ? ' ×' + vals.length : '';
+            const label = def.label + ' (' + OAI_BLOCK[blk] + ')' + count;
+
+            if (def.cleartext) {
+              identifiers.push({
+                field: slot, bucket: def.bucket, label,
+                hashed: false, plaintext: false, masked: false, mask: null,
+                opaque: false, cleartext: true,
+              });
+            } else {
+              const hashed = vals.every(looksHashedSha256);
+              identifiers.push({
+                field: slot, bucket: def.bucket, label, hashed,
+                plaintext: !hashed && !def.opaque, masked: false, mask: null,
+                opaque: !!def.opaque,
+              });
+            }
+            // Only the first value of a multi-value slot is validatable; the
+            // pill's hashed state above still covers every entry.
+            hashParams['oai[' + slot + ']'] = vals[0];
+          }
+        }
+      }
+
+      // Revenue from the first event that carries one.
+      let revenue = null;
+      for (const e of marketing) {
+        const d = e && e.data;
+        if (!d || typeof d !== 'object' || d.amount == null) continue;
+        const value = oaiMajorUnits(d.amount, d.currency);
+        if (value == null) continue;
+        revenue = { value, currency: d.currency ? String(d.currency) : null };
+        break;
+      }
+
+      // The diagnostic is the only place the pixel states its own consent. Note
+      // the asymmetry documented in the reference: `true` means "not denied" —
+      // "never asked" and "actively granted" are indistinguishable on the wire,
+      // because the SDK's default is granted. `false` IS conclusive.
+      let consent = null;
+      const dd = diagnostic && diagnostic.data;
+      if (dd && typeof dd === 'object') {
+        const dropped = Number(dd.dropped_event_count);
+        consent = {
+          state: dd.consent === false ? 'denied' : (dd.consent === true ? 'not-denied' : null),
+          aam: (dd.config && dd.config.automatic_advanced_matching != null)
+            ? String(dd.config.automatic_advanced_matching) : null,
+          droppedEvents: Number.isFinite(dropped) && dropped > 0 ? dropped : 0,
+          droppedReasons: (dd.dropped_event_reason_counts && typeof dd.dropped_event_reason_counts === 'object')
+            ? dd.dropped_event_reason_counts : null,
+        };
+      }
+
+      return {
+        provider: 'openai',
+        transport: 'standard',
+        event,
+        standardEvent: marketing.length > 0 && marketing.every(e => OAI_STANDARD_EVENTS.has(String(e.type))),
+        providerId: pid,
+        identifiers,
+        consent,
+        revenue,
+        hashParams,
+      };
+    },
+  };
+
+  // -------------------------------------------------------------------------
   // Registry
   // -------------------------------------------------------------------------
 
-  const registry = [metaDetector, tiktokDetector, pinterestDetector, bingDetector, linkedinDetector, snapchatDetector, redditDetector];
+  const registry = [metaDetector, tiktokDetector, pinterestDetector, bingDetector, linkedinDetector, snapchatDetector, redditDetector, openaiDetector];
 
   root.EcDetectors = {
     registry,
