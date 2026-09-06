@@ -380,12 +380,20 @@ async function generateStoreScreenshots() {
   await context.close();
 }
 
+// The two promo tiles are the only place the covered services can be named —
+// the store listing text gets rejected for it. Kept in the order the panel's
+// filter bar uses.
+const PROMO_SERVICES = [
+  'Google Ads', 'GA4', 'Meta', 'TikTok', 'Pinterest',
+  'Bing', 'LinkedIn', 'Snapchat', 'Reddit', 'OpenAI',
+];
+
 function buildPromoTileHtml({ width, height, layout }) {
   const isSmall = layout === 'small';
   const iconSize = isSmall ? 96 : 200;
   const titleSize = isSmall ? 30 : 76;
   const taglineSize = isSmall ? 14 : 30;
-  const versionSize = isSmall ? 12 : 22;
+  const versionSize = isSmall ? 11 : 22;
   const padX = isSmall ? 28 : 80;
   const gap = isSmall ? 22 : 56;
 
@@ -474,12 +482,17 @@ function buildPromoTileHtml({ width, height, layout }) {
     color: rgba(255,255,255,0.85);
     max-width: ${isSmall ? 240 : 820}px;
   }
-  .version {
+  .services {
     font-size: ${versionSize}px;
-    color: rgba(255,255,255,0.55);
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
+    line-height: 1.45;
+    color: rgba(255,255,255,0.6);
+    ${/* Marquee: 1400 - 2*80 padding - 200 icon - 56 gap = 984px available, and
+          the list needs ~940 to stay on one line. */''}
+    max-width: ${isSmall ? 260 : 975}px;
   }
+  /* nowrap: a two-word service name must never break across lines. */
+  .services b { color: #FFB37A; font-weight: 600; white-space: nowrap; }
+  .services .sep { color: rgba(255,255,255,0.3); margin: 0 0.15em; }
 </style>
 </head>
 <body>
@@ -488,9 +501,13 @@ function buildPromoTileHtml({ width, height, layout }) {
     <div class="text">
       <div class="title"><span class="accent">ec</span> Data Validator</div>
       <div class="tagline">${isSmall
-        ? 'Inspect Google Ads enhanced conversion data — hash, decode, verify.'
-        : 'Inspect, hash and verify Google Ads enhanced conversion data. Decode Cloud-Edge tokens and audit Tag Gateway &amp; server-side GTM traffic.'}</div>
-      <div class="version">Chrome Extension</div>
+        ? 'Hash-check the user data your tags send — and catch PII leaving the browser unhashed.'
+        : 'Inspect, hash and verify Google Ads enhanced conversion data. Decode Cloud-Edge tokens, audit Tag Gateway &amp; server-side GTM — and catch personal data leaving the browser unhashed.'}</div>
+      ${/* The spaces around the separator are load-bearing: without them the
+            whole list is one unbreakable word and overflows the small tile. */''}
+      <div class="services">${PROMO_SERVICES
+        .map(s => `<b>${s}</b>`)
+        .join(' <span class="sep">·</span> ')}</div>
     </div>
   </div>
 </body>
