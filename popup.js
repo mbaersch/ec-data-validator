@@ -1391,9 +1391,14 @@ document.addEventListener('DOMContentLoaded', () => {
         html += '<span class="cap-filter-links"><a class="cap-filter-link" data-flt="all" role="button" tabindex="0">all</a> · <a class="cap-filter-link" data-flt="none" role="button" tabindex="0">none</a></span>';
         html += sources.map(s => {
             const active = !hiddenSources.has(s);
-            return `<span class="cap-filter-chip ${active ? 'active' : ''}" data-src="${escapeHtml(s)}" role="button" tabindex="0" aria-pressed="${active}">${escapeHtml(providerLabel(s))}</span>`;
+            // A dot marks a service that actually produced captures — most useful
+            // on a chip that is switched OFF, where its cards are hidden.
+            const hasData = present.has(s);
+            const title = hasData ? ' title="This service has captures in the list — shown even while its chip is off"' : '';
+            return `<span class="cap-filter-chip ${active ? 'active' : ''}${hasData ? ' has-data' : ''}" data-src="${escapeHtml(s)}" role="button" tabindex="0" aria-pressed="${active}"${title}>${escapeHtml(providerLabel(s))}</span>`;
         }).join('');
         bar.innerHTML = html;
+        bar.classList.toggle('rec-live', recording);
         bar.hidden = false;
         bar.querySelectorAll('.cap-filter-chip').forEach(chip => {
             const toggle = () => {
@@ -1527,6 +1532,10 @@ document.addEventListener('DOMContentLoaded', () => {
     function setRecordingUI(rec) {
         recording = rec;
         recDot.classList.toggle('live', rec);
+        // The filter bar is not re-rendered on start/stop, so the pulse hangs off
+        // a class on the bar rather than off each chip's markup.
+        const fBar = document.getElementById('capFilterBar');
+        if (fBar) fBar.classList.toggle('rec-live', rec);
         recStatusText.textContent = rec ? 'recording' : 'idle';
         recToggle.textContent = rec ? 'Stop' : 'Start';
         recToggle.classList.toggle('primary', !rec);

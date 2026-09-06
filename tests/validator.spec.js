@@ -2,6 +2,7 @@ const { test, expect, chromium } = require('@playwright/test');
 const path = require('path');
 const fs = require('fs');
 const fixtures = require('./fixtures.js');
+const detectorFixtures = require('./detector-fixtures.js');
 
 const EXTENSION_PATH = path.resolve(__dirname, '..');
 const USER_DATA_DIR = path.resolve(__dirname, '..', 'tmp-user-data-test');
@@ -278,5 +279,101 @@ test('18. OpenAI: cleartext geo is marked as by-design, never as a leak', async 
   const row = page.locator('#emResult .res-table tr').filter({ hasText: 'Postal code (init)' });
   await expect(row).toContainText('CLEARTEXT BY DESIGN');
   await expect(row.locator('.no-match')).toHaveCount(0);
+  await page.close();
+});
+
+// --- Activity dot on the filter chips -----------------------------------
+// A chip that is switched OFF hides its cards — which is exactly when you can
+// no longer tell that the service is firing. The dot is the answer, so it must
+// survive the toggle.
+
+// Seed captures straight into the service worker's state, the same way the
+// screenshot harness does. Detector flags are NOT set here: the panel's first
+// load reconciles them against the real (absent) permissions and would write
+// them straight back to false — they have to be set after the stub is in place.
+async function seedCaptures(recording) {
+  let sw = context.serviceWorkers()[0];
+  if (!sw) sw = await context.waitForEvent('serviceworker');
+  await sw.evaluate(({ caps, rec }) => {
+    state.captures = caps;
+    state.recording = rec;
+    chrome.storage.local.set({ captureState: state });
+  }, { caps: detectorFixtures.CAPTURES, rec: recording });
+}
+
+// Open the panel with the host permissions faked as granted, then enable the
+// detectors and reload — the same order test 14 uses, and the only one that
+// survives the reconciliation described above.
+async function openPopupWithDetectors() {
+  const { page } = await openPopup();
+  await page.addInitScript(() => {
+    if (window.chrome && window.chrome.permissions) {
+      window.chrome.permissions.contains = () => Promise.resolve(true);
+    }
+  });
+  await page.evaluate(() => new Promise((r) => chrome.storage.local.set({
+    enabledDetectors: { meta: true, openai: true }, hiddenSources: [],
+  }, r)));
+  await page.reload();
+  await page.waitForSelector('.tabs .tab.active');
+  return page;
+}
+
+function chipInfo(page, src) {
+  return page.evaluate((s) => {
+    const bar = document.getElementById('capFilterBar');
+    const c = bar.querySelector(`.cap-filter-chip[data-src="${s}"]`);
+    if (!c) return null;
+    return {
+      active: c.classList.contains('active'),
+      hasData: c.classList.contains('has-data'),
+      anim: getComputedStyle(c, '::before').animationName,
+      recLive: bar.classList.contains('rec-live'),
+    };
+  }, src);
+}
+
+test('19. Filter chips: the activity dot survives switching the chip off', async () => {
+  await seedCaptures(false);
+  const page = await openPopupWithDetectors();
+  await page.waitForSelector('#capFilterBar .cap-filter-chip');
+  // Start via the button: the reload above disconnects the panel port, and the
+  // auto-stop option would have turned a pre-seeded recording back off.
+  await page.click('#recToggle');
+  await page.waitForTimeout(350);
+
+  expect(await chipInfo(page, 'meta')).toMatchObject({ hasData: true, recLive: true });
+  // A chip only gets a dot when captures of that service exist — 'ga' is in the
+  // order list but produces none here.
+  expect(await chipInfo(page, 'ga')).toBeNull();
+
+  await page.click('.cap-filter-chip[data-src="meta"]');
+  await page.waitForTimeout(250);
+  const off = await chipInfo(page, 'meta');
+  expect(off.active).toBe(false);
+  expect(off.hasData).toBe(true);          // the point of the feature
+  expect(off.anim).toMatch(/flt-live-pulse/);
+
+  // Restore the show state so the next test starts from a visible chip.
+  await page.evaluate(() => new Promise((r) => chrome.storage.local.set({ hiddenSources: [] }, r)));
+  await page.close();
+});
+
+test('20. Filter chips: the dot stops pulsing once recording stops', async () => {
+  await seedCaptures(false);
+  const page = await openPopupWithDetectors();
+  await page.waitForSelector('#capFilterBar .cap-filter-chip');
+
+  const idle = await chipInfo(page, 'meta');
+  expect(idle.hasData).toBe(true);
+  expect(idle.recLive).toBe(false);
+  expect(idle.anim).toBe('none');          // static marker, not an animation
+
+  await page.click('#recToggle');          // Start
+  await page.waitForTimeout(350);
+  expect((await chipInfo(page, 'meta')).recLive).toBe(true);
+  await page.click('#recToggle');          // Stop
+  await page.waitForTimeout(350);
+  expect((await chipInfo(page, 'meta')).recLive).toBe(false);
   await page.close();
 });

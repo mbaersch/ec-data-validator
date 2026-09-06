@@ -241,6 +241,32 @@
     .cap-filter-chip { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.3px; padding: 2px 7px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface-alt); color: var(--text-muted); cursor: pointer; user-select: none; }
     .cap-filter-chip.active { background: var(--primary); color: #fff; border-color: var(--primary); }
     .cap-filter-chip:hover { border-color: var(--primary); }
+    /* "has-data": this service has captures in the ring. Deliberately independent
+       of .active — a service whose chip is toggled OFF is exactly the case where
+       you cannot see its cards, so the dot is the only hint that it fired at all.
+       A pseudo-element, so the chip needs no extra markup. The pulse runs only
+       while recording (.rec-live on the bar); once stopped the dot stays as a
+       static marker instead of animating through the whole analysis. */
+    .cap-filter-chip.has-data::before {
+      content: ''; display: inline-block; width: 0.55em; height: 0.55em; border-radius: 50%;
+      margin-right: 0.45em; vertical-align: 0.05em; background: #10b981;
+    }
+    .cap-filter-chip.active.has-data::before { background: #fff; }
+    .cap-filter-bar.rec-live .cap-filter-chip.has-data::before { animation: flt-live-pulse 1.5s infinite; }
+    .cap-filter-bar.rec-live .cap-filter-chip.active.has-data::before { animation-name: flt-live-pulse-on; }
+    @keyframes flt-live-pulse {
+      0%   { box-shadow: 0 0 0 0 rgba(16,185,129,0.6); }
+      70%  { box-shadow: 0 0 0 0.4em rgba(16,185,129,0); }
+      100% { box-shadow: 0 0 0 0 rgba(16,185,129,0); }
+    }
+    @keyframes flt-live-pulse-on {
+      0%   { box-shadow: 0 0 0 0 rgba(255,255,255,0.7); }
+      70%  { box-shadow: 0 0 0 0.4em rgba(255,255,255,0); }
+      100% { box-shadow: 0 0 0 0 rgba(255,255,255,0); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .cap-filter-bar.rec-live .cap-filter-chip.has-data::before { animation: none; }
+    }
     .cap-filter-links { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.3px; color: var(--text-muted); margin-right: 2px; }
     .cap-filter-link { color: var(--primary); cursor: pointer; text-decoration: none; }
     .cap-filter-link:hover { text-decoration: underline; }
