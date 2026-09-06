@@ -218,3 +218,65 @@ test('14. Service filter bar shows on load when a detector is enabled', async ()
   await page.evaluate(() => new Promise((r) => chrome.storage.local.set({ enabledDetectors: {} }, r)));
   await page.close();
 });
+
+// --- OpenAI pixel: the origin-nested user block ------------------------------
+// The one thing no other pixel does — the same identifier arrives once as the
+// site supplied it (in) and once as the SDK scraped it off the page (fm/js/ht).
+// The panel has to keep those apart, or a disagreement between the two is
+// invisible. Hashes are the reference fixtures (docs 2026-09-01-openai-pixel-
+// reference.md §11): identity A went to init, identity B sat in the form.
+const OAI_EM_A = '973dfe463ec85785f5f95af5ba3906eedb2d931c24e69824a89ea65dba4e813b'; // test@example.com
+const OAI_EM_B = '6d91ea2f7e0eea059183972f9d6fe225ee7d4248e4281f1ce5a90e33f25448b6'; // aam@example.com
+const OAI_PH_A = '8b47a52ed04d068c3a9c5632b98cec18780a9f9f4099d4f8afe233970ce116fe'; // 491701234567
+const OAI_REQUEST = `event=order_created&oai[in.em]=${OAI_EM_A}&oai[in.ph]=${OAI_PH_A}&oai[fm.em]=${OAI_EM_B}&oai[in.pc]=20095`;
+
+async function pasteEm(page, value) {
+  await activateTab(page, 'tab-em');
+  await page.fill('#emInput', value);
+  await page.dispatchEvent('#emInput', 'input');
+  await page.waitForTimeout(300);
+}
+
+test('15. OpenAI: init and scraped email are separate rows, not merged', async () => {
+  const { page, errors } = await openPopup();
+  await pasteEm(page, OAI_REQUEST);
+
+  const html = await page.locator('#emResult').innerHTML();
+  expect(html).toMatch(/OpenAI Ad Measurement Pixel/);
+  expect(html).toMatch(/Email \(init\)/);
+  expect(html).toMatch(/Email \(form\)/);
+  expect(html).toMatch(/order_created/);
+
+  expect(errors).toEqual([]);
+  await page.close();
+});
+
+test('16. OpenAI: the site-supplied email matches while the scraped one does not', async () => {
+  const { page } = await openPopup();
+  await pasteEm(page, OAI_REQUEST);
+  await fillVerification(page, 'v_email', 'test@example.com');
+
+  // Row order follows the block order, so init comes before form.
+  const rows = page.locator('#emResult .res-table tr');
+  await expect(rows.filter({ hasText: 'Email (init)' }).locator('.match')).toBeVisible();
+  await expect(rows.filter({ hasText: 'Email (form)' }).locator('.no-match')).toBeVisible();
+  await page.close();
+});
+
+test('17. OpenAI: phone normalization (digits, no leading zeros) reproduces the hash', async () => {
+  const { page } = await openPopup();
+  await pasteEm(page, OAI_REQUEST);
+  await fillVerification(page, 'v_phone', '+49 170 1234567');
+  const rows = page.locator('#emResult .res-table tr');
+  await expect(rows.filter({ hasText: 'Phone (init)' }).locator('.match')).toBeVisible();
+  await page.close();
+});
+
+test('18. OpenAI: cleartext geo is marked as by-design, never as a leak', async () => {
+  const { page } = await openPopup();
+  await pasteEm(page, OAI_REQUEST);
+  const row = page.locator('#emResult .res-table tr').filter({ hasText: 'Postal code (init)' });
+  await expect(row).toContainText('CLEARTEXT BY DESIGN');
+  await expect(row.locator('.no-match')).toHaveCount(0);
+  await page.close();
+});

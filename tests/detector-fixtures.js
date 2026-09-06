@@ -8,7 +8,7 @@ const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex');
 
 const EMAIL = 'mail@markus-baersch.de';
 const emHash = sha256(EMAIL.toLowerCase());        // 8d9b70fd… — same across all providers
-const phMeta = sha256('4917612345678');            // Meta/Pinterest: digits, no '+'
+const phMeta = sha256('4917612345678');            // Meta/Pinterest/OpenAI: digits, no '+'
 const phE164 = sha256('+4917612345678');           // TikTok/Bing: E.164 with '+'
 const fnHash = sha256('markus');
 const lnHash = sha256('baersch');
@@ -124,10 +124,37 @@ const CAPTURES = [
     detectorParams: { event: 'Purchase', 'rdt[em]': emHash, 'rdt[pn]': phE164, 'rdt[external_id]': extId },
   }),
 
+  // OpenAI — a batch whose user block is split by origin: the site passed the
+  // email/phone to init (in.*), while the SDK scraped a DIFFERENT email off the
+  // form (fm.em) — the two disagree about who the user is. Geo rides in
+  // cleartext by design, and the diagnostic event reports the pixel's own
+  // consent state plus two calls it rejected.
+  cap({
+    ts: ts(7), method: 'POST',
+    url: 'https://bzr.openai.com/v1/sdk/events?pid=S6i2zvvbTXxj5gR64Szf6a&ec=2',
+    host: 'bzr.openai.com',
+    provider: 'openai', source: 'openai', event: 'order_created',
+    providerId: 'S6i2zvvbTXxj5gR64Szf6a',
+    detectorRevenue: { value: '124.97', currency: 'EUR' },
+    detectorConsent: { state: 'not-denied', aam: 'enabled', droppedEvents: 2,
+      droppedReasons: { unsupported_event_name: 2 } },
+    identifiers: [
+      idf('in.em', 'email', { label: 'Email (init)' }),
+      idf('in.ph', 'phone', { label: 'Phone (init)' }),
+      idf('in.pc', 'postal', { label: 'Postal code (init)', hashed: false, cleartext: true }),
+      idf('fm.em', 'email', { label: 'Email (form)' }),
+    ],
+    detectorParams: {
+      event: 'order_created',
+      'oai[in.em]': emHash, 'oai[in.ph]': phMeta, 'oai[in.pc]': '20095',
+      'oai[fm.em]': sha256('scraped@example.com'),
+    },
+  }),
+
   // Meta — a PageView leaking the email UNHASHED: the red "raw" pill, the whole
   // point of the tool.
   cap({
-    ts: ts(7),
+    ts: ts(8),
     url: 'https://www.facebook.com/tr/', host: 'www.facebook.com',
     provider: 'meta', source: 'meta', event: 'PageView', providerId: '1004723150984266',
     identifiers: [idf('em', 'email', { hashed: false, plaintext: true })],

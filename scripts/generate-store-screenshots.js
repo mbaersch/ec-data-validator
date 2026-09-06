@@ -184,7 +184,7 @@ async function generateStoreScreenshots() {
   async function snap(filename, opts) {
     const { tabTarget, mockCaptures = null, mockRecording = false, setupFn, enableDetectors = false } = opts;
     const enabledDetectors = enableDetectors
-      ? { meta: true, tiktok: true, pinterest: true, bing: true, linkedin: true, snapchat: true, reddit: true }
+      ? { meta: true, tiktok: true, pinterest: true, bing: true, linkedin: true, snapchat: true, reddit: true, openai: true }
       : null;
     const page = await context.newPage();
     await page.addInitScript((data) => {

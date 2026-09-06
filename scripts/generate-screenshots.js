@@ -101,7 +101,7 @@ async function generateScreenshots() {
     state.recording = false;
     const enabledDetectors = {
       meta: true, tiktok: true, pinterest: true, bing: true,
-      linkedin: true, snapchat: true, reddit: true
+      linkedin: true, snapchat: true, reddit: true, openai: true
     };
     chrome.storage.local.set({ captureState: state, enabledDetectors });
   }, CAPTURES);
