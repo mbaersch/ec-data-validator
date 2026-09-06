@@ -23,6 +23,7 @@
       --card-linkedin: #e7f3fb;
       --card-snapchat: #fef8d9;
       --card-reddit: #ffe8de;
+      --card-openai: #f4f4f5;
       --text: #1e293b;
       --text-muted: #64748b;
       --text-faint: #94a3b8;
@@ -56,6 +57,7 @@
       --card-linkedin: #16222e;
       --card-snapchat: #33300d;
       --card-reddit: #34190f;
+      --card-openai: #22252a;
       --text: #e2e8f0;
       --text-muted: #94a3b8;
       --text-faint: #64748b;
@@ -202,6 +204,10 @@
     .cap-pill.consent-unset  { background: #ffedd5; color: #9a3412; }
     .cap-pill.pii-raw    { background: #fee2e2; color: #991b1b; }
     .cap-pill.pii-masked { background: #f1f5f9; color: #64748b; }
+    /* Cleartext by the provider's design (OpenAI geo) — not a leak, but the real
+       value does leave the page. Dashed outline via inset shadow so the pill
+       keeps the exact height of every other one. */
+    .cap-pill.pii-clear  { background: var(--surface-alt); color: var(--text-strong); box-shadow: inset 0 0 0 1px var(--text-fainter); }
     .cap-pill.meta-event { background: #e7f0fe; color: #1877f2; }
     .cap-card.source-meta { border-left: 3px solid #1877f2; padding-left: 8px; background: var(--surface-cool); }
     .cap-card.source-tiktok { border-left: 3px solid #ff0050; padding-left: 8px; background: var(--card-tiktok); }
@@ -210,6 +216,7 @@
     .cap-card.source-linkedin { border-left: 3px solid #0a66c2; padding-left: 8px; background: var(--card-linkedin); }
     .cap-card.source-snapchat { border-left: 3px solid #eab308; padding-left: 8px; background: var(--card-snapchat); }
     .cap-card.source-reddit { border-left: 3px solid #ff4500; padding-left: 8px; background: var(--card-reddit); }
+    .cap-card.source-openai { border-left: 3px solid #000; padding-left: 8px; background: var(--card-openai); }
     /* Google Ads is the focus topic — it keeps a plain (white) card, just a
        neutral grey rail so every card reads as "bordered". */
     .cap-card.source-ads { border-left: 3px solid #94a3b8; padding-left: 8px; }
@@ -225,6 +232,7 @@
     .cap-pill.provider-linkedin  { background: #0a66c2; color: #fff; }
     .cap-pill.provider-reddit    { background: #ff4500; color: #fff; }
     .cap-pill.provider-snapchat  { background: #fffc00; color: #111; }
+    .cap-pill.provider-openai    { background: #000; color: #fff; }
 
     /* Per-service show/hide bar above the card list — only shown once at least
        one additional (non-Google) detector service is enabled. */
@@ -248,6 +256,8 @@
     .cap-card-conv .conv-new-true  { color: #065f46; font-weight: 700; }
     .cap-card-conv .conv-new-false { color: #92400e; }
     .cap-card-conv .conv-items { cursor: help; border-bottom: 1px dotted var(--text-faint); }
+    .cap-card-conv .conv-alert { color: #991b1b; font-weight: 700; cursor: help; }
+    .cap-card-conv .conv-hint  { cursor: help; border-bottom: 1px dotted var(--text-faint); }
     .cap-empty { text-align: center; padding: 16px 15px; color: var(--text-muted); font-size: 11px; font-style: italic; }
 
     .footer { margin-top: 8px; padding: 10px 15px; border-top: 1px solid var(--border); text-align: center; font-size: 10px; color: var(--text-faint); background: var(--surface); }
@@ -476,6 +486,13 @@
         <div class="settings-text">
           <div class="settings-label">Reddit Pixel</div>
           <div class="settings-desc">Detect user data in Reddit Pixel requests (<code>alb.reddit.com/rp.gif</code>). Enabling asks for permission to read <code>alb.reddit.com</code> requests; disabling revokes it again. Manually-set (<code>em</code>, <code>pn</code>) and auto-collected (<code>auto_em</code>, <code>auto_pn</code>) advanced-matching are normally SHA-256 hashed — a known field arriving unhashed is flagged as a <strong>plaintext leak</strong>.</div>
+        </div>
+      </label>
+      <label class="settings-item">
+        <input type="checkbox" id="svcOpenai">
+        <div class="settings-text">
+          <div class="settings-label">OpenAI Ad Measurement Pixel</div>
+          <div class="settings-desc">Detect user data in OpenAI pixel requests (<code>bzr.openai.com/v1/sdk/events</code>). Enabling asks for permission to read <code>bzr.openai.com</code> requests; disabling revokes it again. This pixel nests its user block <strong>by origin</strong>: <code>in</code> is what the site passed to <code>oaiq('init')</code>, while <code>fm</code> / <code>js</code> / <code>ht</code> were scraped off the page by the SDK's automatic advanced matching — the panel keeps them apart, so you can see who supplied which identifier. Email, phone, name and external ID are SHA-256; <strong>geo fields travel in cleartext by design</strong> and are marked, not flagged. A hashed field arriving unhashed is a <strong>plaintext leak</strong>.</div>
         </div>
       </label>
     </div>

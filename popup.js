@@ -816,7 +816,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 value: String(value),
                 verifyId: fv ? fv.verifyId : null,
                 normalize: fv ? fv.normalize : null,
-                exact: fv ? !!fv.exact : false
+                exact: fv ? !!fv.exact : false,
+                cleartext: !!(profile.cleartextSlots && profile.cleartextSlots.has(field))
             });
         }
         return out;
@@ -866,6 +867,9 @@ document.addEventListener('DOMContentLoaded', () => {
             let status = '';
             if (f.verifyId && cmp[f.verifyId]) {
                 status = renderMatchStatus(f.value, cmp[f.verifyId]);
+            }
+            if (f.cleartext) {
+                status += '<span class="fmt-note" title="This provider sends this field unhashed by design — nothing to validate, and not a leak.">CLEARTEXT BY DESIGN</span>';
             }
             status += encPill(enc);
             const statusBlock = status.trim() ? `<div class="status-line">${status}</div>` : '';
@@ -1278,19 +1282,26 @@ document.addEventListener('DOMContentLoaded', () => {
         return identifiers.map(f => {
             const def = DETECTOR_BUCKET_PILL[f.bucket] || { cls: '', label: f.label || f.field };
             const fld = escapeHtml(f.field);
+            const name = escapeHtml(f.label || def.label);
+            if (f.cleartext) {
+                // Sent unhashed because the provider's spec says so (OpenAI's geo
+                // fields). The value does leave the page, but it is not a leak —
+                // marked, never flagged.
+                return `<span class="cap-pill pii-clear" title="${name} — cleartext by design, this provider does not hash this field">${fld}</span>`;
+            }
             if (f.opaque) {
                 // Opaque advertiser id (external_id) — not PII, so never a "leak"
                 // whether it arrives hashed or as a plain value.
                 const state = f.hashed ? 'SHA-256 hashed' : 'plain value (opaque id, not PII)';
-                return `<span class="cap-pill ${def.cls}" title="${escapeHtml(def.label)} — ${state}">${fld}</span>`;
+                return `<span class="cap-pill ${def.cls}" title="${name} — ${state}">${fld}</span>`;
             }
             if (f.plaintext) {
-                return `<span class="cap-pill pii-raw" title="${escapeHtml(def.label)} sent UNHASHED — plaintext PII leaving the browser">${fld} ⚠ raw</span>`;
+                return `<span class="cap-pill pii-raw" title="${name} sent UNHASHED — plaintext PII leaving the browser">${fld} ⚠ raw</span>`;
             }
             if (f.hashed) {
-                return `<span class="cap-pill ${def.cls}" title="${escapeHtml(def.label)} — SHA-256 hashed">${fld}</span>`;
+                return `<span class="cap-pill ${def.cls}" title="${name} — SHA-256 hashed">${fld}</span>`;
             }
-            return `<span class="cap-pill pii-masked" title="${escapeHtml(def.label)} — masked value only, no raw data sent">${fld} masked</span>`;
+            return `<span class="cap-pill pii-masked" title="${name} — masked value only, no raw data sent">${fld} masked</span>`;
         }).join('');
     }
 
@@ -1304,7 +1315,26 @@ document.addEventListener('DOMContentLoaded', () => {
             segs.push(`<span class="conv-val" title="Conversion value">${escapeHtml(String(c.detectorRevenue.value))}${cur}</span>`);
         }
         if (c.providerId) segs.push(`<span title="Pixel ID">id ${escapeHtml(c.providerId)}</span>`);
-        if (c.detectorConsent && c.detectorConsent.ldu) segs.push('<span title="Limited Data Use active">LDU</span>');
+        const dc = c.detectorConsent;
+        if (dc && dc.ldu) segs.push('<span title="Limited Data Use active">LDU</span>');
+        // OpenAI reports its own state in the diagnostic event it sends alongside
+        // the real ones — the only pixel here that does.
+        if (dc && dc.state === 'denied') {
+            segs.push('<span class="conv-alert" title="The pixel\'s own diagnostic reports consent = false. Marketing events are dropped before the network; only this session-marker diagnostic went out.">consent denied</span>');
+        } else if (dc && dc.state === 'not-denied') {
+            segs.push('<span class="conv-hint" title="The diagnostic reports consent = true — but this SDK defaults to granted, so &quot;never asked&quot; and &quot;actively consented&quot; are indistinguishable on the wire.">consent not denied</span>');
+        }
+        if (dc && dc.aam) {
+            segs.push(`<span class="conv-hint" title="Automatic advanced matching is set per ACCOUNT and reported back in the diagnostic — the SDK scrapes form fields, JS variables and HTML for identifiers when it is on.">AAM ${escapeHtml(dc.aam)}</span>`);
+        }
+        if (dc && dc.droppedEvents) {
+            const reasons = dc.droppedReasons
+                ? Object.keys(dc.droppedReasons).map(k => `${k}: ${dc.droppedReasons[k]}`).join(', ')
+                : '';
+            const tip = 'The pixel rejected these calls itself (bad event name or payload) — they were never sent, so they are invisible anywhere else.'
+                + (reasons ? ' Reasons — ' + reasons : '');
+            segs.push(`<span class="conv-alert" title="${escapeHtml(tip)}">${dc.droppedEvents} dropped</span>`);
+        }
         if (segs.length === 0) return '';
         return `<div class="cap-card-conv">${segs.join('<span class="conv-sep">·</span>')}</div>`;
     }
@@ -1313,9 +1343,10 @@ document.addEventListener('DOMContentLoaded', () => {
     // source; Google captures carry 'ads' / 'ga'.
     const PROVIDER_LABEL = {
         ads: 'Google Ads', ga: 'GA4', meta: 'Meta', tiktok: 'TikTok', bing: 'Bing',
-        pinterest: 'Pinterest', linkedin: 'LinkedIn', snapchat: 'Snapchat', reddit: 'Reddit'
+        pinterest: 'Pinterest', linkedin: 'LinkedIn', snapchat: 'Snapchat', reddit: 'Reddit',
+        openai: 'OpenAI'
     };
-    const PROVIDER_ORDER = ['ads', 'ga', 'meta', 'tiktok', 'pinterest', 'bing', 'linkedin', 'snapchat', 'reddit'];
+    const PROVIDER_ORDER = ['ads', 'ga', 'meta', 'tiktok', 'pinterest', 'bing', 'linkedin', 'snapchat', 'reddit', 'openai'];
     function providerLabel(src) { return PROVIDER_LABEL[src] || src; }
 
     // The service-name pill — always the first pill on every card.
@@ -1776,6 +1807,7 @@ document.addEventListener('DOMContentLoaded', () => {
         { elId: 'svcLinkedin',  flag: 'linkedin',  origins: ['https://px.ads.linkedin.com/*', 'https://px4.ads.linkedin.com/*'] },
         { elId: 'svcSnapchat',  flag: 'snapchat',  origins: ['https://tr.snapchat.com/*', 'https://tr6.snapchat.com/*'] },
         { elId: 'svcReddit',    flag: 'reddit',    origins: ['https://alb.reddit.com/*'] },
+        { elId: 'svcOpenai',    flag: 'openai',    origins: ['https://bzr.openai.com/*'] },
     ];
     let enabledDetectors = {};
 
