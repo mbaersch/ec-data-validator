@@ -75,7 +75,13 @@ function buildFixtureCaptures() {
   ];
 }
 
-function buildStoreCss(bgDataUri) {
+// `dark` must mirror the panel's own dark tokens (--bg / --border in
+// popup.html). The wrapper paints the surface BEHIND the panel content, so a
+// hard-coded white here shows through as a white panel in a dark-mode shot.
+function buildStoreCss(bgDataUri, dark) {
+  const surface = dark ? '#0f1115' : '#ffffff';
+  const edge    = dark ? '#2f3540' : '#d1d5db';
+  const shadow  = dark ? 'rgba(0,0,0,0.5)' : 'rgba(0,0,0,0.06)';
   return `
     html, body {
       margin: 0 !important;
@@ -83,7 +89,7 @@ function buildStoreCss(bgDataUri) {
       overflow: hidden !important;
       width: ${VIEW_W}px !important;
       height: ${VIEW_H}px !important;
-      background: #ffffff !important;
+      background: ${surface} !important;
     }
     body::before {
       content: '';
@@ -106,11 +112,11 @@ function buildStoreCss(bgDataUri) {
       right: 0 !important;
       width: ${PANEL_W}px !important;
       height: ${VIEW_H}px !important;
-      background: #ffffff !important;
+      background: ${surface} !important;
       border: none !important;
-      border-left: 1px solid #d1d5db !important;
+      border-left: 1px solid ${edge} !important;
       border-radius: 0 !important;
-      box-shadow: -1px 0 4px rgba(0,0,0,0.06) !important;
+      box-shadow: -1px 0 4px ${shadow} !important;
       overflow-y: auto !important;
       overflow-x: hidden !important;
       z-index: 2 !important;
@@ -179,10 +185,11 @@ async function generateStoreScreenshots() {
 
   console.log('Capturing merch.google.com background...');
   const bgDataUri = await captureMerchBackground(context);
-  const storeCss = buildStoreCss(bgDataUri);
+  const storeCss = { light: buildStoreCss(bgDataUri, false), dark: buildStoreCss(bgDataUri, true) };
 
   async function snap(filename, opts) {
-    const { tabTarget, mockCaptures = null, mockRecording = false, setupFn, enableDetectors = false } = opts;
+    const { tabTarget, mockCaptures = null, mockRecording = false, setupFn,
+            enableDetectors = false, theme = null } = opts;
     const enabledDetectors = enableDetectors
       ? { meta: true, tiktok: true, pinterest: true, bing: true, linkedin: true, snapchat: true, reddit: true, openai: true }
       : null;
@@ -212,25 +219,37 @@ async function generateStoreScreenshots() {
           return Promise.resolve({});
         };
       }
-      // For detector scenes: pretend the host permissions are granted and inject
-      // the enabled-detector flags into the storage read, so the panel renders
-      // the service filter bar deterministically (no race on an async set).
-      if (data && data.enabledDetectors && window.chrome && window.chrome.storage) {
-        if (window.chrome.permissions) {
+      // Values the panel reads out of chrome.storage are injected into the read
+      // itself rather than written first — a write would race the panel's own
+      // startup read. Covers the detector flags (filter bar) and the theme.
+      const overrides = {};
+      if (data && data.enabledDetectors) overrides.enabledDetectors = data.enabledDetectors;
+      if (data && data.theme) overrides.theme = data.theme;
+      if (Object.keys(overrides).length && window.chrome && window.chrome.storage) {
+        if (window.chrome.permissions && data.enabledDetectors) {
           window.chrome.permissions.contains = () => Promise.resolve(true);
         }
+        const asksFor = (keys, k) => keys === null || keys === k ||
+          (Array.isArray(keys) && keys.includes(k)) ||
+          (keys && typeof keys === 'object' && !Array.isArray(keys) && k in keys);
         const realGet = window.chrome.storage.local.get.bind(window.chrome.storage.local);
         window.chrome.storage.local.get = function (keys, cb) {
-          const wants = keys === 'enabledDetectors' || keys === null ||
-            (Array.isArray(keys) && keys.includes('enabledDetectors')) ||
-            (keys && typeof keys === 'object' && !Array.isArray(keys) && 'enabledDetectors' in keys);
-          const inject = (res) => { res = res || {}; if (wants) res.enabledDetectors = data.enabledDetectors; return res; };
+          const inject = (res) => {
+            res = res || {};
+            for (const k of Object.keys(overrides)) {
+              if (asksFor(keys, k)) res[k] = overrides[k];
+            }
+            return res;
+          };
           if (typeof cb === 'function') return realGet(keys, (res) => cb(inject(res)));
           return realGet(keys).then(inject);
         };
       }
-    }, { captures: mockCaptures, recording: mockRecording, enabledDetectors });
+    }, { captures: mockCaptures, recording: mockRecording, enabledDetectors, theme });
 
+    // theme-prehydrate.js reads prefers-color-scheme before the first paint —
+    // emulating it keeps the shot from starting light and flipping.
+    if (theme === 'dark') await page.emulateMedia({ colorScheme: 'dark' });
     await page.setViewportSize({ width: VIEW_W, height: VIEW_H });
     await page.goto(popupUrl);
     await page.waitForSelector('.tabs .tab.active');
@@ -241,7 +260,7 @@ async function generateStoreScreenshots() {
     if (setupFn) await setupFn(page);
     await page.waitForTimeout(300);
     await page.evaluate(WRAP_SCRIPT);
-    await page.addStyleTag({ content: storeCss });
+    await page.addStyleTag({ content: theme === 'dark' ? storeCss.dark : storeCss.light });
     await page.waitForTimeout(500);
     await page.screenshot({
       path: path.join(webstoreDir, filename),
@@ -292,12 +311,15 @@ async function generateStoreScreenshots() {
   });
 
   // 02: Hash validation with the normalization diagnostic — click a detector
-  // card, enter a looser plaintext → MATCH + "INPUT NORMALIZED".
+  // card, enter a looser plaintext → MATCH + "INPUT NORMALIZED". Shot in dark
+  // mode: the panel ships both themes, and one dark tile in the store listing
+  // shows that without spending a whole screenshot slot on it.
   await snap('02-hash-validation.png', {
     tabTarget: 'tab-em',
     mockCaptures: CAPTURES,
     mockRecording: true,
     enableDetectors: true,
+    theme: 'dark',
     setupFn: async (p) => {
       await hideIntro(p);
       await p.waitForSelector('.cap-card.source-pinterest');

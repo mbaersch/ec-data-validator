@@ -1,0 +1,63 @@
+Inspect and validate Enhanced Conversion data sent to Google Ads and / or Google Analytics 4. Other Platforms are supported, but deactivated by default.  
+
+You can manually paste em parameter values or record requests while you browse and check what data is included in your Google Ads conversions, user-provided data events or GA4 requests. 
+
+Recording automatically collects em (and eme) parameters in all Google Ads / GA4 collect requests. Shows all request parameters and decodes user data payloads. Hashed data can be checked with clear text input fields for known values. Displays additional conversion data like value, currency, product data, customer status flag, Google Consent Mode flags.  
+
+- Troubleshooting: You can inspect user_data objects pushed via GTM, gtag, or raw JSON before they get processed by your tags. 
+
+- Structure validation: address fields (first_name, country, postal_code, …) outside of user_data.address trigger a structure-error warning — these don't reach Google as expected
+
+- Google Tag Gateway compatible: Tag Gateway and server-side GTM on first-party origins are captured as well
+
+- Export: captures as JSON for documentation or analysis (each entry tagged source: 'ads' | 'ga' and transport: 'google' | 'first-party', plus eme when present)
+
+---
+
+Changelog
+-----------------
+
+v2.9.0
+- OpenAI Ad Measurement Pixel added. user data differentiated by origin (form, js...). Includes dropped events
+- service chips show an indicator for detected requests, even if a service chip is deactivated for card display in the event stream. 
+
+v2.8.0
+- Two services added: 
+  - Snapchat Pixel:  email, phone, name plus hashed age and geo. ignores POST telemetry beacon.  
+  - Reddit: manual and auto-collected email, phone + `external_id`, conversion value. 
+- Service-name pill: Every capture card now leads with a provider pill (brand-coloured)
+- Filter bar: appears above the card list once at least one non-Google detector is enabled
+
+v2.7.0
+- PII-leak detectors for five non-Google ad platforms (all opt-in and default-off) 
+  - Meta Pixel: Logs all requests to known endpoints and highlights found hashes for validation, including external_id values. 
+  - TikTok Pixel: email, phone and external id. 
+ - Pinterest: email hash only on all events. supports SHA-256, SHA-1 or MD5. 
+  - Bing / UET / MS Ads: email, phone, ecom data, custom event properties and value / currency. 
+  - LinkedIn Insight: when a request carries a hashed email address, it will be extracted from the gzip packed payload, too. 
+- Normalization diagnostics on hash validation: Verification is now case-sensitive and distinguishes a clean MATCH from MATCH + INPUT NORMALIZED. Also, a MATCH + RAW · NOT NORMALIZED result (orange) will now be displayed if a validation input is not normalized correctly (and will lead to no match on the receiving end). Per-platform rules are applied.
+
+v2.6.0:
+- Detection for GA4 requests with user data dispatched to a Stape custom loader endpoint
+
+v2.5.3:
+- Opera compatibility
+
+v2.5.1 / v2.5.2:
+- Fix: (silent) error when accessing system settings for dark mode, user data validation issues (street, postal code) 
+
+v2.5:
+- Settings tab (⚙ icon, top right): existing settings moved to new tab, new settings for dark mode and text scaling added.
+- User-data indicator on extension icon: When active, the toolbar badge shows `ud` / `eme` / `em` on the current tab whenever a built-in Google endpoint (Ads `/ccm`, `/pagead`, GA4 `/g/collect`) receives user data — independent of recording, so the icon can act as an ambient "is ec data flowing here?" indicator while you browse. 
+- Conversion summary on captures: a compact second line under the identifier pills shows event type, value + currency, item count (tooltip with SKU × qty @ price), new-customer flag, customer LTV, shipping cost + destination and order ID. Sourced from Google Ads conversion parameters  and GA4 commerce params. 
+- Consent Mode warning: a red `no ad_storage` pill (or orange `ad_storage unset`) is added to the card whenever `gcs` / `gcd` indicates that ad_storage was not granted.
+- Power-user shortcut: Ctrl/⌘+click anywhere on a card opens the detail view directly (the `i` icon still works the same).
+- Clear textboxes: link next to the EM Decoder and Object Analysis textareas — one click empties the field and clears the decoder output.
+
+v2.4:
+- Recording UI overhauled: `Permit` and `Start`/`Stop` are separate buttons now. The URL field is always editable and auto-updates when you switch tabs (unless you are typing in it).
+- Permit-button live status: shows `Permitted ✓` when the origin in the URL field is already covered. `Start` refuses to run on a site that is not permitted, with a clear error.
+- Auto-stop on panel close (default on): closing the side panel ends the recording. Uncheck the new option to keep capturing in the background.
+- Include-subdomains toggle (default off): broadens the Permit request to `https://*.<base>/*`, so a single grant covers shop subdomains and a first-party sGTM on its own subdomain.
+- GA4 / sGTM `user_data` capture: `ep.user_data.*` event parameters and top-level `user_data` JSON bodies are extracted and shown like an `em` payload. Click such a capture to load it into Object Analysis. Only fields with known identifiers (email/phone/address with or without `sha256_`) count — meta keys like `_tag_mode` are ignored.
+- Initiator filter: requests fired from Google's own UIs (`analytics.google.com`, `ads.google.com`, `tagmanager.google.com`, `tagassistant.google.com`) are ignored.

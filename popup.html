@@ -233,6 +233,10 @@
     .cap-pill.provider-reddit    { background: #ff4500; color: #fff; }
     .cap-pill.provider-snapchat  { background: #fffc00; color: #111; }
     .cap-pill.provider-openai    { background: #000; color: #fff; }
+    /* The one brand colour that collides with its own card in dark mode — every
+       other provider pill is chromatic and stays legible. Inverted rather than
+       tinted, so it still reads as the black-and-white mark. */
+    html[data-theme="dark"] .cap-pill.provider-openai { background: #fff; color: #000; }
 
     /* Per-service show/hide bar above the card list — only shown once at least
        one additional (non-Google) detector service is enabled. */
