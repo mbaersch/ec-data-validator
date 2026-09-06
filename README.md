@@ -58,7 +58,7 @@ Use it to verify that ec tracking is working and the data leaving the browser ac
 
 **PII-leak detectors for non-Google ad platforms** (optional, all default-off):
 
-Beyond Google Ads / GA4, the extension can flag when personal data leaves the browser toward other advertising services — useful to check that identifiers are actually **hashed** (and correctly normalized) before they go out, and to catch **plaintext leaks**. Seven detectors ship:
+Beyond Google Ads / GA4, the extension can flag when personal data leaves the browser toward other advertising services — useful to check that identifiers are actually **hashed** (and correctly normalized) before they go out, and to catch **plaintext leaks**. Eight detectors ship:
 
 - **Meta Pixel** — advanced-matching fields (`ud[em]`, `ud[ph]`, `ud[fn]`, …) on `facebook.com` / `connect.facebook.net`
 - **TikTok Pixel** — the nested `context.user` object (`email`, `phone`, …) on `analytics.tiktok.com`
@@ -67,17 +67,20 @@ Beyond Google Ads / GA4, the extension can flag when personal data leaves the br
 - **LinkedIn Insight Tag** — the hashed email (`hem`) that rides in the gzip-compressed `/wa/` POST on `px.ads.linkedin.com` (the panel decodes `base64(gzip(JSON))` transparently)
 - **Snapchat Pixel** — the GET `/p` tracking beacon on `tr.snapchat.com`, hashing email, phone, name plus **age and geo** (`u_hem`, `u_hpn`, `u_age`, `l_city`, …); the POST telemetry beacon carries no identifiers and is ignored
 - **Reddit Pixel** — the `rp.gif` beacon on `alb.reddit.com`, with manual (`em`, `pn`) and **auto-collected** (`auto_em` comma list, `auto_pn` `weight~hash` pipe list) advanced matching plus an opaque `external_id`
+- **OpenAI Ad Measurement Pixel** — the batched JSON POST to `bzr.openai.com/v1/sdk/events`, whose user block is nested **by origin**: `in` is what the site handed to `oaiq('init')`, while `fm` / `js` / `ht` were scraped off the page by the SDK itself. The detector keeps them apart, so you can see *who supplied which identifier* — and spot when the two disagree
 
-Each detector is enabled individually in the **Settings** tab. Enabling one triggers a **runtime permission request** for just that service's origins (via `optional_host_permissions`, so the installed manifest never changes); disabling revokes it again. Captured requests appear in the same clickable card list, each leading with a **service-name pill** and **tinted per provider** (Meta cool-blue, TikTok fuchsia, Pinterest red, Bing teal, LinkedIn azure, Snapchat yellow, Reddit orangered) so the source is obvious at a glance. Google Ads — the focus of the tool — stays a plain card with just a neutral grey rail. Once at least one non-Google detector is enabled, a **per-service filter bar** appears above the card list to show/hide each service (with `all` / `none` shortcuts).
+Each detector is enabled individually in the **Settings** tab. Enabling one triggers a **runtime permission request** for just that service's origins (via `optional_host_permissions`, so the installed manifest never changes); disabling revokes it again. Captured requests appear in the same clickable card list, each leading with a **service-name pill** and **tinted per provider** (Meta cool-blue, TikTok fuchsia, Pinterest red, Bing teal, LinkedIn azure, Snapchat yellow, Reddit orangered, OpenAI black) so the source is obvious at a glance. Google Ads — the focus of the tool — stays a plain card with just a neutral grey rail. Once at least one non-Google detector is enabled, a **per-service filter bar** appears above the card list to show/hide each service (with `all` / `none` shortcuts).
 
 - **Leak flagging**: a known identifier field arriving **unhashed** (plaintext) is called out as a leak. Hashed fields show a neutral identifier pill.
 - **Hash validation with normalization diagnostics**: click a card to load its hash slots into the shared PII Parameters field, then enter the known plaintext. The match is **case-sensitive** and reports three states — a clean **MATCH** (green), **MATCH + INPUT NORMALIZED** (your input was looser than the canonical form, e.g. `UPPERCASE` or a `0049…` phone — the tool normalized it for you), and **MATCH + RAW · NOT NORMALIZED** (orange): the hash reproduces from your *raw* input, which means the tag hashed an un-normalized value that will **not** match on the platform side — a real implementation defect the green states would otherwise hide.
-- **Per-platform normalization**: each service's documented rules are applied — Meta/Pinterest phone without `+`, TikTok/Bing phone as E.164 with `+`; Meta/Pinterest city with spaces removed; Pinterest email with all spaces stripped; etc. Pinterest additionally accepts **SHA-256, SHA-1 or MD5** — the algorithm is auto-detected per hash length and validated accordingly.
+- **Per-platform normalization**: each service's documented rules are applied — Meta/Pinterest/OpenAI phone without `+`, TikTok/Bing phone as E.164 with `+`; Meta/Pinterest city with spaces removed; Pinterest email with all spaces stripped; etc. Pinterest additionally accepts **SHA-256, SHA-1 or MD5** — the algorithm is auto-detected per hash length and validated accordingly.
+- **Cleartext fields are marked, not flagged**: OpenAI sends its geo fields (`co`, `ct`, `rg`, `pc`) unhashed *by design*. Those get a neutral pill and a `CLEARTEXT BY DESIGN` note instead of a leak warning — red would be wrong, but an unexplained hash-less value would be just as confusing.
+- **OpenAI's diagnostic event is read as free QA**: the pixel reports its own state alongside the real events — the **consent** flag (`consent denied` is conclusive; `consent not denied` is as much as the wire says, because the SDK defaults to granted), whether the **account** has automatic advanced matching on, and how many calls the SDK **dropped** as invalid, with reasons. Dropped calls are invisible anywhere else, since nothing is sent for them.
 - **`external_id` is treated as opaque**: it gets its own neutral pill and is **never** flagged as a leak (it is an opaque CRM/customer ID, not PII), and when hashed it is validated exactly / case-preserving without a false RAW warning. Meta's custom-data variant `cd[external_id]` is recognized too.
 - **Bing e-commerce**: a Bing custom event (`evt=custom`) is surfaced by its real action from `ea` (`purchase`, `refund`, `add_to_cart`, …) instead of a flat "custom", and its conversion value (`ecomm_totalvalue` / `gv`, plus currency) is shown as a value pill on the card.
 
 <!-- Regenerate with `npm run screenshots`. -->
-<img width="420" alt="PII-leak detection across Meta, TikTok, Pinterest, Bing, LinkedIn, Snapchat and Reddit — a service filter bar on top, each card led by a provider pill, one flagged with an unhashed-email leak" src="screenshots/04-detectors.png" />
+<img width="420" alt="PII-leak detection across Meta, TikTok, Pinterest, Bing, LinkedIn, Snapchat, Reddit and OpenAI — a service filter bar on top, each card led by a provider pill, one flagged with an unhashed-email leak" src="screenshots/04-detectors.png" />
 
 ## Install
 
@@ -147,7 +150,7 @@ The codebase is small and unbundled — no build step. Edit, reload the extensio
 - `manifest.json` — MV3 config
 - `background.js` — service worker, handles recording and the message API
 - `popup.html` / `popup.js` — Side Panel UI
-- `detectors.js` — provider-agnostic registry for the non-Google PII-leak detectors (Meta / TikTok / Pinterest / Bing / LinkedIn / Snapchat / Reddit); loaded by the service worker via `importScripts` and by the panel
+- `detectors.js` — provider-agnostic registry for the non-Google PII-leak detectors (Meta / TikTok / Pinterest / Bing / LinkedIn / Snapchat / Reddit / OpenAI); loaded by the service worker via `importScripts` and by the panel
 
 For diagnostic helpers in the service worker console (`chrome://extensions/` → click "Service worker"):
 
@@ -162,6 +165,15 @@ lightTest()          // 30s diagnostic listener that logs every match
 ```
 
 ## Changelog
+
+### v2.9.0
+
+- **New detector: the OpenAI Ad Measurement Pixel** (`oaiq`, opt-in and default-off like the others). It reads the batched JSON POST to `bzr.openai.com/v1/sdk/events` — the pixel id rides in the query (`?pid=`), one request is normally several events, and two internal event types (`openai::sdk_init`, `oai::diagnostic`) share the same transport and are told apart from real ones.
+- **The user block stays split by origin.** No other pixel here reveals *who* collected an identifier: `user.in` is what the site passed to `oaiq('init')`, while `user.fm` / `user.js` / `user.ht` were scraped from form fields, JS variables and the HTML by the SDK's automatic advanced matching. The panel validates each block as its own slot (`oai[in.em]`, `oai[fm.em]`, …), so one plaintext entry shows a **MATCH** against the site's own value and an **ERR** against the scraped one when the two disagree about who the user is — a merged `em` would hide exactly that.
+- **Cleartext by design, marked as such.** OpenAI's geo fields (`co`, `ct`, `rg`, `pc`) are specified to travel unhashed. They get a neutral pill plus a `CLEARTEXT BY DESIGN` note rather than a leak warning — the field is now a property of the validation profile (`cleartextSlots`), available to any future provider.
+- **The pixel's own diagnostic is surfaced.** Consent state (`consent denied` is conclusive — `consent not denied` is all the wire supports, since the SDK defaults to granted and "never asked" looks identical to "consented"), the **account's** automatic-advanced-matching setting, and the count and reasons of calls the SDK **dropped** as invalid — the last being genuinely invisible otherwise, because a rejected call sends nothing at all.
+- **Conversion value in minor units.** OpenAI's `amount` is an integer in the currency's smallest unit, so the exponent comes from the currency: dividing by 100 unconditionally would invent a 100× error on JPY/KRW/CLP/ISK/VND and a 10× one on BHD/KWD/OMR. Without a currency the raw value is shown as-is rather than guessed at.
+- Normalization rules and the full field reference are in [`docs/platform-user-data-rules.md`](docs/platform-user-data-rules.md); they were verified against the reference fixtures (known plaintext → SHA-256) rather than assumed.
 
 ### v2.8.0
 

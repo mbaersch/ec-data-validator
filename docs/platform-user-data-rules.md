@@ -1,6 +1,7 @@
 # Plattform-Spezifikationen: User-Daten-Normalisierung & Hashing
 
-Stand: 2026-07-05 (Detektoren live seit v2.7.0; Snapchat + Reddit ab v2.8.0)
+Stand: 2026-09-06 (Detektoren live seit v2.7.0; Snapchat + Reddit ab v2.8.0;
+OpenAI ab v2.9.0)
 
 Dieses Dokument fasst die Hashing- und Normalisierungsregeln der gaengigen
 Werbeplattform-Conversion-APIs zusammen, vergleicht sie mit den jeweils
@@ -23,6 +24,7 @@ oder PRs gegen die untersuchten Templates.
 | Microsoft CAPI | `capi.uet.microsoft.com/v1/{tagID}/events` | em, ph                                          | clientIpAddress, clientUserAgent, msclkid, anonymousId, externalId, idfa, gaid | E.164 mit `+`         | n/a                 | nicht im Schema |
 | Snapchat Pixel | `tr.snapchat.com/p` (GET-Beacon)  | u_hem, u_hpn, u_fn, u_ln, **u_age**, l_city, l_gc, l_gpc, l_gr | — (POST `/p` = Telemetrie, ignoriert)          | Ziffern **ohne `+`**  | **bleiben** (nur lowercase) | n/a |
 | Reddit Pixel | `alb.reddit.com/rp.gif` (GET-Beacon) | em, pn, external_id, auto_em, auto_pn          | —                                                        | E.164 mit `+`         | n/a                 | n/a |
+| OpenAI Pixel | `bzr.openai.com/v1/sdk/events` (POST, JSON) | em, ph, fn, ln, eid — je Block `in`/`fm`/`js`/`ht` | co, ct, rg, pc (**by design**)                | Ziffern **ohne `+`**  | n/a (city Klartext) | n/a |
 
 Email-Normalisierung divergiert kraeftiger als oben darstellbar; Detail in
 den jeweiligen Abschnitten.
@@ -441,20 +443,98 @@ Quelle: `tracking-auditor-extension/lib/reddit.js` + beobachtete
 
 ---
 
+## OpenAI — Ad Measurement Pixel (Browser)
+
+Browser-Pixel (`oaiq`) auf `POST bzr.openai.com/v1/sdk/events`, JSON-Body als
+`text/plain`. Die Pixel-ID steht in der **Query** (`?pid=…`), nicht im Body. Ein
+Request ist normalerweise ein **Batch**; zwei interne Event-Typen fahren im
+selben Transport mit (`openai::sdk_init`, `oai::diagnostic`).
+
+### Der Unterschied zu allen anderen: Verschachtelung nach Herkunft
+
+Der `user`-Block ist nach **Herkunft** unterteilt — das macht kein anderes hier
+dokumentiertes Pixel:
+
+| Block | Herkunft |
+|-------|----------|
+| `in`  | was die Seite an `oaiq('init', {user})` uebergeben hat — bewusst gesendet |
+| `fm`  | vom SDK aus **Formularfeldern** gescraped (Automatic Advanced Matching) |
+| `js`  | aus **JS-Variablen** gescraped |
+| `ht`  | aus dem **HTML** gescraped |
+
+Damit ist am Payload ablesbar, ob die Seite einen Identifier *geschickt* hat
+oder ob das SDK ihn *selbst eingesammelt* hat. Deshalb fuehrt der Detektor jeden
+Block als eigenen Slot (`oai[in.em]`, `oai[fm.em]`, …) statt sie zu einem `em`
+zusammenzufassen: weichen die Werte voneinander ab, sind sich Seite und SDK
+uneins, wer der Nutzer ist — und genau das waere beim Zusammenfassen unsichtbar.
+
+In den Auto-Bloecken sind `em`/`ph` **Arrays**, in `in` Einzelwerte. Validiert
+wird der erste Eintrag; die Hashed-Pruefung der Card-Pill laeuft ueber alle.
+
+### Felder & Regeln
+
+| Feld  | Bucket      | Hashed? | Normalisierung                                                        |
+|-------|-------------|---------|-----------------------------------------------------------------------|
+| `em`  | Email       | SHA256  | `trim().toLowerCase()`.                                               |
+| `ph`  | Phone       | SHA256  | Ziffern, **ohne `+`**, fuehrende Nullen entfernt (8–15 Stellen).      |
+| `fn`  | First name  | SHA256  | lowercase, Whitespace + **ASCII**-Punktuation entfernt; Nicht-ASCII und Ziffern bleiben. |
+| `ln`  | Last name   | SHA256  | wie `fn`.                                                             |
+| `eid` | External ID | SHA256  | nur `trim()`, **case-preserving** → opak, nie als Leak markiert.      |
+| `co` / `ct` / `rg` / `pc` | Country / City / Region / Postal | **Klartext** | by design ungehasht. Wird markiert („cleartext by design"), **nie** als Leak gewertet. |
+
+Das SDK hasht selbst: ein an `init` uebergebener Wert, der nicht schon 64-hex
+ist, wird im Browser normalisiert und gehasht. Klartext in einem Hash-Slot ist
+deshalb ein echter Implementierungsfehler und wird als Leak markiert.
+
+### Diagnose-Event als Gratis-QA
+
+`oai::diagnostic` meldet den eigenen Zustand des Pixels — der Detektor liest
+drei Dinge daraus in die Event-Zeile der Karte:
+
+- **`consent`** — der einzige Consent-Ausweis unter allen Detektoren hier. Aber:
+  Default des SDK ist *granted*, `consent: true` heisst also nur „nicht
+  abgelehnt" — „nie gefragt" und „aktiv zugestimmt" sind auf dem Draht
+  ununterscheidbar. Nur `false` ist eindeutig. Die UI formuliert entsprechend
+  („consent not denied" vs. „consent denied").
+- **`config.automatic_advanced_matching`** — ob das **Konto** AAM anhat; von der
+  Seite aus sonst nicht sichtbar.
+- **`dropped_event_count`** + Gruende — vom SDK selbst verworfene Aufrufe
+  (falscher Event-Name, kaputtes Payload). Die sind sonst nirgends sichtbar,
+  weil gar nichts gesendet wird.
+
+Ein Consent-Widerruf loescht ausserdem die First-Party-Identitaet aktiv
+(`__obref`/`__oppref` auf der **Publisher**-Domain, nicht bei OpenAI).
+
+### Falle: `amount` ist in der kleinsten Waehrungseinheit
+
+`data.amount` ist ein Integer in Minor Units: `12497` + `EUR` = 124,97 €, aber
+`12497` JPY sind 12497 Yen. Blindes `/100` erzeugt bei den ~16 Null-Dezimal-
+Waehrungen (JPY, KRW, CLP, ISK, VND …) einen Hundertfach-Fehler und bei den
+drei-dezimaligen (BHD, KWD, OMR …) einen Zehnfach-Fehler. Der Detektor rechnet
+per Waehrungs-Exponent um; ohne `currency` bleibt der Rohwert stehen.
+
+Quelle: `tracking-auditor-extension/docs/2026-09-01-openai-pixel-reference.md`
+(aus `oaiq.min.js` v0.1.32 gelesen + Live-Captures). Verifiziert gegen die dort
+dokumentierten Fixtures: `sha256("test@example.com")` → `973dfe46…`,
+`sha256("491701234567")` → `8b47a52e…` (aus `+49 170 1234567`).
+
+---
+
 ## Implikationen fuer die Extension
 
-**Status (v2.8.0):** Die Extension validiert nicht mehr nur Google-EC. Sieben
+**Status (v2.9.0):** Die Extension validiert nicht mehr nur Google-EC. Acht
 **client-seitige PII-Leak-Detektoren** sind umgesetzt — Meta Pixel, TikTok
-Pixel, Pinterest, Bing UET, LinkedIn Insight Tag, Snapchat Pixel und Reddit
-Pixel — als optionale, default-off Dienste (`detectors.js`, provider-agnostische
+Pixel, Pinterest, Bing UET, LinkedIn Insight Tag, Snapchat Pixel, Reddit Pixel
+und OpenAI Pixel — als optionale, default-off Dienste (`detectors.js`, provider-agnostische
 Registry). Sie lesen die **Browser-Pixel-Requests** (nicht die hier
 dokumentierten Server-CAPIs), verwenden aber genau die oben aufgefuehrten
 Normalisierungs- und Hash-Regeln. Die pro-Plattform-Divergenzen sind damit
 produktiv relevant:
 
-1. **Phone `+` vs. ohne:** Meta + Pinterest + **Snapchat** ohne `+`, TikTok +
-   Bing + **Reddit** als E.164 mit `+`. In den Detektoren als `normPhone` /
-   `normPhoneNoPlus` (ohne `+`) bzw. `normPhoneE164` (mit `+`) abgebildet.
+1. **Phone `+` vs. ohne:** Meta + Pinterest + **Snapchat** + **OpenAI** ohne
+   `+`, TikTok + Bing + **Reddit** als E.164 mit `+`. In den Detektoren als
+   `normPhone` / `normPhoneNoPlus` (ohne `+`) bzw. `normPhoneE164` (mit `+`)
+   abgebildet.
 2. **Email-Spaces:** Pinterest strippt alle Leerzeichen (`normEmailNoSpace`),
    die anderen nur `trim().toLowerCase()`.
 3. **Multi-Algo:** Pinterest akzeptiert SHA-256/SHA-1/MD5 — der Algorithmus
@@ -464,6 +544,13 @@ produktiv relevant:
 5. **RAW-Diagnose:** matcht ein Hash nur gegen den **un-normalisierten**
    Eingabewert, warnt die Extension (orange „RAW · NOT NORMALIZED"), weil der
    Wert auf der Plattform-Seite nie matchen wird.
+6. **Klartext by design:** OpenAIs Geo-Felder sind spezifikationsgemaess
+   ungehasht. Sie bekommen eine eigene, neutrale Kennzeichnung
+   (`cleartextSlots` im Validierungsprofil) — ein Leak-Rot waere hier schlicht
+   falsch, ein kommentarloser Wert ohne Hash aber genauso irritierend.
+7. **Herkunft der Identifier:** OpenAI ist bisher das einzige Pixel, an dem
+   ablesbar ist, ob die Seite einen Wert geschickt oder das SDK ihn selbst
+   gescraped hat (`in` vs. `fm`/`js`/`ht`). Die Slots bleiben getrennt.
 
 Der urspruenglich hier vorgeschlagene „zweiter Tab"-Ansatz wurde bewusst
 verworfen — die Detektoren fuegen sich stattdessen in den bestehenden
@@ -501,6 +588,7 @@ Browser-Pixel):
 - Pinterest — [Python API Client: ConversionEventsUserData Schema](https://github.com/pinterest/pinterest-python-generated-api-client/blob/main/docs/ConversionEventsUserDataAnyOf2.md)
 - Microsoft — [Conversions API (CAPI) Guide](https://learn.microsoft.com/en-us/advertising/guides/uet-conversion-api-integration?view=bingads-13)
 - Microsoft — [Offline Conversion Bulk API](https://learn.microsoft.com/en-us/advertising/bulk-service/offline-conversion?view=bingads-13)
+- OpenAI — [Ads Measurement Pixel](https://developers.openai.com/ads/measurement-pixel) (nennt weder Pfad noch Payload-Keys; die verwendeten Regeln stammen aus `oaiq.min.js` v0.1.32 und Live-Captures, siehe `tracking-auditor-extension/docs/2026-09-01-openai-pixel-reference.md`)
 
 ### Untersuchte Templates
 
