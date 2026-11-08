@@ -86,12 +86,16 @@
 
   // base64 text → raw bytes, and gzip bytes → text (async, via DecompressionStream
   // — available in both the service worker and the panel). Used for LinkedIn's
-  // base64(gzip(JSON)) /wa/ body.
+  // /wa/ body: base64(gzip(JSON)) with fmt=g, plain base64(JSON) with fmt=b.
   function base64ToBytes(b64) {
     const bin = atob(b64);
     const bytes = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
     return bytes;
+  }
+  async function waBytesToText(bytes) {
+    if (bytes[0] !== 0x1f || bytes[1] !== 0x8b) return new TextDecoder('utf-8').decode(bytes);
+    return gunzipToText(bytes);
   }
   async function gunzipToText(bytes) {
     const stream = new Response(bytes).body.pipeThrough(new DecompressionStream('gzip'));
@@ -701,7 +705,7 @@
       let json;
       try {
         const b64 = new TextDecoder('utf-8').decode(bytes).trim();
-        json = JSON.parse(await gunzipToText(base64ToBytes(b64)));
+        json = JSON.parse(await waBytesToText(base64ToBytes(b64)));
       } catch (e) { return null; }
       if (!json || typeof json !== 'object' || Array.isArray(json)) return null;
 

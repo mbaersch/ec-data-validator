@@ -432,7 +432,9 @@ function extractConversionData(queryParams, bodyParams, pathname) {
   if (isGa) {
     const value = numOrNull(all['epn.value']) ?? numOrNull(all['ep.value']);
     if (value !== null) out.value = value;
-    if (all['ep.currency']) out.currency = String(all['ep.currency']);
+    // gtag sends the event currency as cu; ep.currency only when a site passes it as a custom param
+    const currency = all.cu || all['ep.currency'];
+    if (currency) out.currency = String(currency);
     if (all.en) out.eventType = String(all.en);
     if (all['ep.transaction_id']) out.orderId = String(all['ep.transaction_id']);
     let itemCount = 0;
@@ -687,8 +689,30 @@ function handleRequest(details) {
   const effectiveUrl = (customLoader === 'stape-b64') ? decoded.url : details.url;
   const effectivePath = customLoader ? '/g/collect' : pathname;
 
-  const { em, eme, queryParams, bodyParams } = extractAllParams(effectiveUrl, details.requestBody);
-  const userData = extractUserData(effectiveUrl, details.requestBody);
+  // GA4 batches several events into one POST, one urlencoded event per body line.
+  // Parsed as one blob, each line's first key would swallow into the previous
+  // line's last value and every event but the first would vanish — one capture each.
+  for (const requestBody of ga4EventBodies(details.requestBody, effectivePath)) {
+    captureGoogleRequest(details, requestBody, { host, pathname, transport, customLoader, effectiveUrl, effectivePath });
+  }
+}
+
+function ga4EventBodies(body, effectivePath) {
+  if (!effectivePath.includes('/g/collect')) return [body];
+  const bytes = rawRequestBytes(body);
+  if (!bytes) return [body];
+  const text = new TextDecoder('utf-8').decode(bytes);
+  if (/^\s*[{[]/.test(text)) return [body];
+  const lines = text.split(/\r?\n/).filter(l => l.trim() !== '');
+  if (lines.length < 2) return [body];
+  const enc = new TextEncoder();
+  return lines.map(l => ({ raw: [{ bytes: enc.encode(l).buffer }] }));
+}
+
+function captureGoogleRequest(details, requestBody, ctx) {
+  const { host, pathname, transport, customLoader, effectiveUrl, effectivePath } = ctx;
+  const { em, eme, queryParams, bodyParams } = extractAllParams(effectiveUrl, requestBody);
+  const userData = extractUserData(effectiveUrl, requestBody);
   const conversion = extractConversionData(queryParams, bodyParams, effectivePath);
 
   const gcsRaw = (queryParams && queryParams.gcs) || (bodyParams && bodyParams.gcs) || null;
