@@ -166,6 +166,14 @@ lightTest()          // 30s diagnostic listener that logs every match
 
 ## Changelog
 
+### Unreleased
+
+- **GA4 currency from `cu`.** gtag sends the event currency as `cu`; only `ep.currency` was read, so a real `generate_lead` with a value showed it without currency.
+- **One capture per batched GA4 event.** GA4 sends several events in one POST, one per body line. Parsed as one blob, every event after the first disappeared (and the first key of each line was swallowed). Each line is now its own capture.
+- **LinkedIn `/wa/` without gzip.** Beacon sends (`fmt=b`) carry plain base64 JSON; only the gzipped form (`fmt=g`) was decoded.
+- **Google tag gateway.** Ads conversions on the site's own domain in the gateway's short form (`<path>/as/p/c/<id>/`) were dropped; they are now captured as Ads conversions (first-party).
+- New `tests/parsing.spec.js`: runs `background.js` and `detectors.js` in a Node vm (no browser) against real requests captured on the ectest page and a test gateway.
+
 ### v2.9.0
 
 - **New detector: the OpenAI Ad Measurement Pixel** (`oaiq`, opt-in and default-off like the others). It reads the batched JSON POST to `bzr.openai.com/v1/sdk/events` — the pixel id rides in the query (`?pid=`), one request is normally several events, and two internal event types (`openai::sdk_init`, `oai::diagnostic`) share the same transport and are told apart from real ones.
