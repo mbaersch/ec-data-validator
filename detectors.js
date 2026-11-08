@@ -852,8 +852,8 @@
   // Reddit Pixel
   // -------------------------------------------------------------------------
   //
-  // A browser pixel hit goes to alb.reddit.com/rp.gif as a GET beacon. The payload
-  // rides in the query string: manually-set hashed em/pn (SHA-256), an opaque
+  // The current pixel POSTs to alb.reddit.com/rp (event and id in the query, the rest
+  // as form body); older ones send a GET beacon to /rp.gif with everything in the query: manually-set hashed em/pn (SHA-256), an opaque
   // external_id, plus AUTO-collected lists — auto_em is a comma-separated list of
   // hashed emails, auto_pn a pipe-separated list of '<weight>~<hash>' phones. This
   // is the ONLY beacon carrying Reddit user identifiers (no separate AM request).
@@ -880,7 +880,7 @@
     permissionOrigins: ['https://alb.reddit.com/*'],
 
     match(host, pathname) {
-      return isRedditHost(host) && /^\/rp\.gif$/.test(pathname || '');
+      return isRedditHost(host) && /^\/rp(\.gif)?$/.test(pathname || '');
     },
 
     validation: {

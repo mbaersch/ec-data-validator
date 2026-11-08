@@ -106,3 +106,15 @@ test('Stape Data Client: one capture with user data, consent and event, on any p
   ctx.handleRequest({ url: 'https://s.example.com/x?v=2&event=purchase', method: 'POST', timeStamp: 3, tabId: -1, requestBody: raw(body) });
   expect(captures(ctx)).toHaveLength(2);
 });
+
+test('Reddit: the current POST /rp (form body) is captured like the /rp.gif beacon', async () => {
+  const ctx = loadExtension();
+  vm.runInContext('enabledDetectors = { reddit: true };', ctx);
+  const h = 'a'.repeat(64);
+  ctx.handleRequest({ url: 'https://alb.reddit.com/rp?event=PageVisit&id=t2_test123', method: 'POST', timeStamp: 1, tabId: -1,
+    requestBody: { formData: { em: [h], ts: ['1'] } } });
+  await new Promise(r => setTimeout(r, 20));
+  const [c] = captures(ctx);
+  expect(c).toMatchObject({ provider: 'reddit', event: 'PageVisit' });
+  expect(c.identifiers.find(f => f.field === 'em').hashed).toBe(true);
+});

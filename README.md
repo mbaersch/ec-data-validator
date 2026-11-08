@@ -174,6 +174,7 @@ lightTest()          // 30s diagnostic listener that logs every match
 - **Google tag gateway.** Ads conversions on the site's own domain in the gateway's short form (`<path>/as/p/c/<id>/`) were dropped; they are now captured as Ads conversions (first-party).
 - **Meta `aud[em][0][v]`.** The nested form of automatic advanced matching is now a hash slot like `aud[em]`, so a plaintext value there is reported as a leak.
 - **Stape Data Client.** Requests of the Stape Data Tag to a server container (own JSON format, `?v=2&event=<name>` with the same `event_name` in the body, any path) become their own cards (service "Stape Data", pill "Data Client") on granted first-party origins: event name, `consent_state`, and user data from a `user_data` object or top-level `email_address` / `phone_number` / name fields — shown and analysed like Google `user_data`.
+- **Reddit `POST /rp`.** The current pixel posts to `alb.reddit.com/rp` (event and id in the query, user data in the form body); only the `/rp.gif` beacon was recognised.
 - New `tests/parsing.spec.js`: runs `background.js` and `detectors.js` in a Node vm (no browser) against real requests captured on the ectest page and a test gateway.
 
 ### v2.9.0
