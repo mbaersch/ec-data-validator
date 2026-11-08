@@ -68,3 +68,13 @@ test('LinkedIn /wa/: gzip body (fmt=g) and plain base64 body (fmt=b) both decode
   expect(b).toBeTruthy();
   expect(b.identifiers[0].bucket).toBe('email');
 });
+
+test('Google tag gateway: /as/p/c/ on the own domain is an Ads conversion', () => {
+  const ctx = loadExtension();
+  ctx.handleRequest({ url: fx.GTG_ADS_CONVERSION, method: 'POST', timeStamp: 1, tabId: -1, requestBody: null });
+  const [c] = captures(ctx);
+  expect(c).toBeTruthy();
+  expect(c.transport).toBe('first-party');
+  expect(c.source).toBe('ads');
+  expect(c.conversion).toMatchObject({ value: 10, currency: 'EUR', orderId: 'TEST-gtg-1794150833611' });
+});

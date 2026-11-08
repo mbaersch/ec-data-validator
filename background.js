@@ -393,7 +393,8 @@ function parseGcd(raw) {
 
 function extractConversionData(queryParams, bodyParams, pathname) {
   const all = Object.assign({}, queryParams || {}, bodyParams || {});
-  const isAds = /\/(pagead|ccm)\/conversion\//.test(pathname);
+  // as/p/c/<id>/: Google tag gateway short form of pagead/conversion (same params)
+  const isAds = /\/(pagead|ccm)\/conversion\/|\/as\/p\/c\/\d{6,}\//.test(pathname);
   const isGa  = (pathname || '').includes('/g/collect');
   if (!isAds && !isGa) return null;
 
@@ -743,7 +744,7 @@ function captureGoogleRequest(details, requestBody, ctx) {
   // Original-Pfad, landen also genau dann im Ring, wenn user_data/em/eme erkannt
   // wurde — das eigentliche Ziel der Extension.
   if (transport === 'first-party') {
-    const hasPathMarker = /\/(ccm|pagead|g\/collect)(\/|$)/.test(pathname);
+    const hasPathMarker = /\/(ccm|pagead|g\/collect)(\/|$)|\/as\/p\/c\/\d{6,}\//.test(pathname);
     if (!hasPathMarker && !em && !eme && !userData) return;
   }
 
