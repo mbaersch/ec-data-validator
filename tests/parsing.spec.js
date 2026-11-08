@@ -78,3 +78,14 @@ test('Google tag gateway: /as/p/c/ on the own domain is an Ads conversion', () =
   expect(c.source).toBe('ads');
   expect(c.conversion).toMatchObject({ value: 10, currency: 'EUR', orderId: 'TEST-gtg-1794150833611' });
 });
+
+test('Meta: nested aud[em][0][v] is a hash slot, plaintext there is a leak', () => {
+  const ctx = loadExtension();
+  const meta = ctx.EcDetectors.byId('meta');
+  const h = 'a'.repeat(64);
+  const ok = meta.parse({ queryParams: { id: '123', ev: 'Lead' }, bodyParams: { 'aud[em][0][v]': h, 'aud[em][0][s]': '0' } });
+  const em = ok.identifiers.find(f => f.field === 'em');
+  expect(em).toMatchObject({ hashed: true, plaintext: false });
+  const leak = meta.parse({ queryParams: { id: '123', ev: 'Lead' }, bodyParams: { 'aud[em][0][v]': 'ec.test@example.com' } });
+  expect(leak.identifiers.find(f => f.field === 'em').plaintext).toBe(true);
+});

@@ -134,7 +134,8 @@
     external_id: { bucket: 'externalId', label: 'External ID' },
   };
 
-  const META_UD_KEY_RE = /^(ud|udff|cud|ncud|aud)\[([\w]+)\]$/;
+  // aud also comes nested as aud[em][0][v] (value) + aud[em][0][s] (source flag, skipped).
+  const META_UD_KEY_RE = /^(ud|udff|cud|ncud|aud)\[([\w]+)\](?:\[\d+\]\[v\])?$/;
 
   const META_STANDARD_EVENTS = new Set([
     'PageView', 'ViewContent', 'Search', 'AddToCart', 'AddToWishlist',

@@ -172,6 +172,7 @@ lightTest()          // 30s diagnostic listener that logs every match
 - **One capture per batched GA4 event.** GA4 sends several events in one POST, one per body line. Parsed as one blob, every event after the first disappeared (and the first key of each line was swallowed). Each line is now its own capture.
 - **LinkedIn `/wa/` without gzip.** Beacon sends (`fmt=b`) carry plain base64 JSON; only the gzipped form (`fmt=g`) was decoded.
 - **Google tag gateway.** Ads conversions on the site's own domain in the gateway's short form (`<path>/as/p/c/<id>/`) were dropped; they are now captured as Ads conversions (first-party).
+- **Meta `aud[em][0][v]`.** The nested form of automatic advanced matching is now a hash slot like `aud[em]`, so a plaintext value there is reported as a leak.
 - New `tests/parsing.spec.js`: runs `background.js` and `detectors.js` in a Node vm (no browser) against real requests captured on the ectest page and a test gateway.
 
 ### v2.9.0
