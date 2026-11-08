@@ -89,3 +89,20 @@ test('Meta: nested aud[em][0][v] is a hash slot, plaintext there is a leak', () 
   const leak = meta.parse({ queryParams: { id: '123', ev: 'Lead' }, bodyParams: { 'aud[em][0][v]': 'ec.test@example.com' } });
   expect(leak.identifiers.find(f => f.field === 'em').plaintext).toBe(true);
 });
+
+test('Stape Data Client: one capture with user data, consent and event, on any path', () => {
+  const ctx = loadExtension();
+  ctx.handleRequest({ url: fx.DATA_CLIENT_URL, method: 'POST', timeStamp: 1, tabId: -1, requestBody: raw(fx.DATA_CLIENT_BODY) });
+  const [c] = captures(ctx);
+  expect(c).toMatchObject({ source: 'stape', transport: 'first-party', customLoader: 'stape-data' });
+  expect(c.conversion).toEqual({ eventType: 'page_view' });
+  expect(Object.keys(c.userData)).toEqual(['email_address']);
+  expect(c.consent).toMatchObject({ adStorage: 'granted', analyticsStorage: 'granted' });
+
+  // country at top level is an ordinary param, not user data; a mismatching event_name is no Data Client
+  const body = JSON.stringify({ event_name: 'page_view', country: 'DE' });
+  ctx.handleRequest({ url: 'https://s.example.com/x?v=2&event=page_view', method: 'POST', timeStamp: 2, tabId: -1, requestBody: raw(body) });
+  expect(captures(ctx)[1].userData).toBeNull();
+  ctx.handleRequest({ url: 'https://s.example.com/x?v=2&event=purchase', method: 'POST', timeStamp: 3, tabId: -1, requestBody: raw(body) });
+  expect(captures(ctx)).toHaveLength(2);
+});

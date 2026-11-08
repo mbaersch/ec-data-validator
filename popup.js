@@ -1240,6 +1240,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (c.customLoader === 'stape-b64') {
             return '<span class="cap-pill loader-stape" title="Stape Custom Loader — GA4-Pfad war base64-codiert in der Request-URL maskiert">Stape b64</span>';
         }
+        if (c.customLoader === 'stape-data') {
+            return '<span class="cap-pill loader-stape" title="Stape Data Client — eigenes JSON-Format des Stape Data Tags an den Server-Container; welche Dienste der Server bedient, ist im Browser nicht sichtbar">Data Client</span>';
+        }
         if (c.customLoader === 'custom-path') {
             return '<span class="cap-pill loader-custom" title="Custom-Bereitstellungspfad (Tag Gateway / sGTM) — GA4-Request ohne Standard-/collect-Pfad">Custom-Pfad</span>';
         }
@@ -1344,9 +1347,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const PROVIDER_LABEL = {
         ads: 'Google Ads', ga: 'GA4', meta: 'Meta', tiktok: 'TikTok', bing: 'Bing',
         pinterest: 'Pinterest', linkedin: 'LinkedIn', snapchat: 'Snapchat', reddit: 'Reddit',
-        openai: 'OpenAI'
+        openai: 'OpenAI', stape: 'Stape Data'
     };
-    const PROVIDER_ORDER = ['ads', 'ga', 'meta', 'tiktok', 'pinterest', 'bing', 'linkedin', 'snapchat', 'reddit', 'openai'];
+    const PROVIDER_ORDER = ['ads', 'ga', 'meta', 'tiktok', 'pinterest', 'bing', 'linkedin', 'snapchat', 'reddit', 'openai', 'stape'];
     function providerLabel(src) { return PROVIDER_LABEL[src] || src; }
 
     // The service-name pill — always the first pill on every card.

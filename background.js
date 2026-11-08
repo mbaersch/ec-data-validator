@@ -639,13 +639,7 @@ async function handleDetectorRequest(detector, details, host, pathname) {
     customLoader: null,
     decodedUrl: null
   };
-  enforceCap(capture);
-  state.captures.push(capture);
-  if (state.captures.length > RING_SIZE) {
-    state.captures = state.captures.slice(-RING_SIZE);
-  }
-  persist();
-  broadcast({ type: 'captureAdded', capture, count: state.captures.length });
+  pushCapture(capture);
 }
 
 function handleRequest(details) {
@@ -679,6 +673,14 @@ function handleRequest(details) {
 
   const transport = isGoogleHost(host) ? 'google' : 'first-party';
 
+  if (transport === 'first-party') {
+    const dataClient = stapeDataClientBody(details.url, details.requestBody);
+    if (dataClient) {
+      if (state.recording) captureDataClientRequest(details, dataClient, host);
+      return;
+    }
+  }
+
   // Getarnte GA4-Requests (Stape-base64 / Klartext-Custom-Pfad) koennen nur auf
   // first-party-Transporten auftreten; Google-Endpunkte sind immer Standard.
   const decoded = (transport === 'first-party') ? tryDecodeCustomLoader(details.url) : null;
@@ -696,6 +698,69 @@ function handleRequest(details) {
   for (const requestBody of ga4EventBodies(details.requestBody, effectivePath)) {
     captureGoogleRequest(details, requestBody, { host, pathname, transport, customLoader, effectiveUrl, effectivePath });
   }
+}
+
+// Stape Data Tag -> Data Client: own JSON format. Fingerprint ?v=2&event=<name> plus
+// the same event_name in the body; the path is configurable, so it is not checked.
+function stapeDataClientBody(url, body) {
+  let u;
+  try { u = new URL(url); } catch (e) { return null; }
+  const event = u.searchParams.get('event');
+  if (!event || u.searchParams.get('v') !== '2') return null;
+  const bytes = rawRequestBytes(body);
+  if (!bytes) return null;
+  let obj = null;
+  try { obj = JSON.parse(new TextDecoder('utf-8').decode(bytes)); } catch (e) { return null; }
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj) || obj.event_name !== event) return null;
+  return obj;
+}
+
+// User data rides in a user_data object or as top-level event params (email_address …).
+// Top level only for unambiguous keys: country/city there can be ordinary event params.
+const DATA_CLIENT_TOP_KEYS = ['email', 'email_address', 'sha256_email_address', 'phone_number', 'sha256_phone_number',
+  'first_name', 'sha256_first_name', 'last_name', 'sha256_last_name'];
+
+function dataClientUserData(obj) {
+  const out = {};
+  if (obj.user_data && typeof obj.user_data === 'object' && !Array.isArray(obj.user_data)) mergeUserDataObject(out, obj.user_data);
+  for (const k of DATA_CLIENT_TOP_KEYS) {
+    if (out[k] === undefined && obj[k] != null && obj[k] !== '') out[k] = obj[k];
+  }
+  return hasKnownIdentifier(out) ? out : null;
+}
+
+function captureDataClientRequest(details, obj, host) {
+  const { queryParams, bodyParams } = extractAllParams(details.url, details.requestBody);
+  const cs = obj.consent_state && typeof obj.consent_state === 'object' ? obj.consent_state : null;
+  const flag = (v) => (v === true ? 'granted' : v === false ? 'denied' : null);
+  pushCapture({
+    ts: details.timeStamp,
+    url: details.url,
+    host,
+    method: details.method,
+    em: null,
+    eme: null,
+    userData: dataClientUserData(obj),
+    conversion: { eventType: String(obj.event_name) },
+    consent: cs ? { adStorage: flag(cs.ad_storage), analyticsStorage: flag(cs.analytics_storage), gcs: null, gcd: null, gcdDecoded: null } : null,
+    queryParams,
+    bodyParams,
+    truncated: false,
+    source: 'stape',
+    transport: 'first-party',
+    customLoader: 'stape-data',
+    decodedUrl: null
+  });
+}
+
+function pushCapture(capture) {
+  enforceCap(capture);
+  state.captures.push(capture);
+  if (state.captures.length > RING_SIZE) {
+    state.captures = state.captures.slice(-RING_SIZE);
+  }
+  persist();
+  broadcast({ type: 'captureAdded', capture, count: state.captures.length });
 }
 
 function ga4EventBodies(body, effectivePath) {
@@ -768,13 +833,7 @@ function captureGoogleRequest(details, requestBody, ctx) {
     customLoader,                                          // null | 'stape-b64' | 'custom-path'
     decodedUrl: customLoader === 'stape-b64' ? effectiveUrl : null
   };
-  enforceCap(capture);
-  state.captures.push(capture);
-  if (state.captures.length > RING_SIZE) {
-    state.captures = state.captures.slice(-RING_SIZE);
-  }
-  persist();
-  broadcast({ type: 'captureAdded', capture, count: state.captures.length });
+  pushCapture(capture);
 }
 
 let activeListener = null;
