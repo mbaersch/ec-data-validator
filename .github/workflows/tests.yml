@@ -10,8 +10,6 @@ jobs:
   tests:
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    env:
-      EC_TMP_DIR: ${{ runner.temp }}/ec-data-validator
     steps:
       - uses: actions/checkout@v7
 
@@ -24,6 +22,7 @@ jobs:
         run: |
           npm install -g playwright@1.58.2
           echo "NODE_PATH=$(npm root -g)" >> "$GITHUB_ENV"
+          echo "EC_TMP_DIR=$RUNNER_TEMP/ec-data-validator" >> "$GITHUB_ENV"
 
       - name: Chromium für Playwright
         run: playwright install --with-deps chromium
