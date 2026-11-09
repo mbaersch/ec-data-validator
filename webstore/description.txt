@@ -17,6 +17,13 @@ Recording automatically collects em (and eme) parameters in all Google Ads / GA4
 Changelog
 -----------------
 
+v2.10.0
+- Google Tag Gateway: conversions sent in the gateway's short form (<path>/as/p/c/<id>/) on your own domain are captured as Ads conversions
+- Stape Data Client: requests of the Stape Data Tag to a server container get their own cards with user data, consent state and event name
+- GA4: several events batched into one request now show up as separate captures; currency is read from the cu parameter
+- Fixes for some of the optional platform detectors: additional endpoints and payload formats are recognised; an auto-collected email list is no longer flagged as unhashed
+- If you had the Bing detector enabled, switch it on once more to grant access to an additional endpoint
+
 v2.9.0
 - OpenAI Ad Measurement Pixel added. user data differentiated by origin (form, js...). Includes dropped events
 - service chips show an indicator for detected requests, even if a service chip is deactivated for card display in the event stream. 
