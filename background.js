@@ -813,6 +813,11 @@ function captureGoogleRequest(details, requestBody, ctx) {
     if (!hasPathMarker && !em && !eme && !userData) return;
   }
 
+  // ccm/collect mit tid=DC- ist der Measurement-Ping eines Google-Tags mit Floodlight-ID, kein Ads-Hit.
+  // Ohne Nutzerdaten gibt es hier nichts zu prüfen (kein Floodlight-Detektor, Zweck: Enhanced Conversions).
+  const tid = (queryParams && queryParams.tid) || (bodyParams && bodyParams.tid) || '';
+  if (/\/ccm\/collect(\/|$)/.test(effectivePath || pathname) && /^DC-/i.test(String(tid)) && !em && !eme && !userData) return;
+
   const source = customLoader ? 'ga' : classifySource(host, pathname);
 
   const capture = {
