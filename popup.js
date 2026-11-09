@@ -1815,7 +1815,7 @@ document.addEventListener('DOMContentLoaded', () => {
         { elId: 'svcMeta',      flag: 'meta',      origins: ['https://*.facebook.com/*'] },
         { elId: 'svcTiktok',    flag: 'tiktok',    origins: ['https://analytics.tiktok.com/*'] },
         { elId: 'svcPinterest', flag: 'pinterest', origins: ['https://ct.pinterest.com/*'] },
-        { elId: 'svcBing',      flag: 'bing',      origins: ['https://bat.bing.com/*', 'https://commerce.bing.com/*'] },
+        { elId: 'svcBing',      flag: 'bing',      origins: ['https://bat.bing.com/*', 'https://bat.bing.net/*', 'https://commerce.bing.com/*'] },
         { elId: 'svcLinkedin',  flag: 'linkedin',  origins: ['https://px.ads.linkedin.com/*', 'https://px4.ads.linkedin.com/*'] },
         { elId: 'svcSnapchat',  flag: 'snapchat',  origins: ['https://tr.snapchat.com/*', 'https://tr6.snapchat.com/*'] },
         { elId: 'svcReddit',    flag: 'reddit',    origins: ['https://alb.reddit.com/*'] },

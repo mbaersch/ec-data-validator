@@ -554,7 +554,8 @@
   // Microsoft Bing UET
   // -------------------------------------------------------------------------
   //
-  // A UET hit goes to bat.bing.com/action/0 (or /actionp/0), CST/Flex tags to
+  // A UET hit goes to bat.bing.com or bat.bing.net /action/0 (or /actionp/0; the tag
+  // picks either host for the same data), CST/Flex tags to
   // commerce.bing.com/cst/0 — GET beacons. Enhanced-conversions user data rides
   // inside the `pid` parameter as a NESTED querystring: "em=<sha256>&ph=<sha256>
   // &fn=…&ln=…" (email/phone/first/last, SHA-256). We parse that inner string and
@@ -569,7 +570,7 @@
 
   function isBingHost(host) {
     const h = (host || '').toLowerCase();
-    return h === 'bat.bing.com' || h === 'commerce.bing.com';
+    return h === 'bat.bing.com' || h === 'bat.bing.net' || h === 'commerce.bing.com';
   }
 
   function isUetPath(pathname) {
@@ -580,7 +581,7 @@
   const bingDetector = {
     id: 'bing',
     label: 'Bing UET',
-    permissionOrigins: ['https://bat.bing.com/*', 'https://commerce.bing.com/*'],
+    permissionOrigins: ['https://bat.bing.com/*', 'https://bat.bing.net/*', 'https://commerce.bing.com/*'],
 
     match(host, pathname) {
       return isBingHost(host) && isUetPath(pathname);
@@ -854,8 +855,8 @@
   //
   // The current pixel POSTs to alb.reddit.com/rp (event and id in the query, the rest
   // as form body); older ones send a GET beacon to /rp.gif with everything in the query: manually-set hashed em/pn (SHA-256), an opaque
-  // external_id, plus AUTO-collected lists — auto_em is a comma-separated list of
-  // hashed emails, auto_pn a pipe-separated list of '<weight>~<hash>' phones. This
+  // external_id, plus AUTO-collected lists — auto_em and auto_pn are both pipe-separated
+  // '<weight>~<hash>' lists (seen live 2026-11-09; the weight is NOT part of the hash). This
   // is the ONLY beacon carrying Reddit user identifiers (no separate AM request).
   // Email is lower/trim → SHA-256; phone is hashed in E.164 WITH the leading '+'.
   // The auto lists are surfaced as pills (hashed check across every entry) but are
@@ -870,8 +871,10 @@
     return (host || '').toLowerCase() === 'alb.reddit.com';
   }
 
-  function redditSplitList(v, sep) {
-    return (v == null ? '' : String(v)).split(sep).map(s => s.trim()).filter(Boolean);
+  // '<weight>~<hash>' entries; ',' is accepted too in case a pixel version still uses it.
+  function redditAutoHashes(v) {
+    return (v == null ? '' : String(v)).split(/[|,]/).map(s => s.trim()).filter(Boolean)
+      .map(e => { const i = e.indexOf('~'); return i > 0 ? e.slice(i + 1) : e; });
   }
 
   const redditDetector = {
@@ -926,7 +929,7 @@
       single('pn', 'phone', 'Phone', false);
       single('external_id', 'externalId', 'External ID', true);
 
-      const autoEm = redditSplitList(get('auto_em'), ',');
+      const autoEm = redditAutoHashes(get('auto_em'));
       if (autoEm.length) {
         const allHashed = autoEm.every(looksHashedSha256);
         identifiers.push({
@@ -934,11 +937,7 @@
           hashed: allHashed, plaintext: !allHashed, masked: false, mask: null, opaque: false,
         });
       }
-      // auto_pn entries are '<weight>~<hash>' — check the hash part.
-      const autoPn = redditSplitList(get('auto_pn'), '|').map(e => {
-        const i = e.indexOf('~');
-        return i > 0 ? e.slice(i + 1) : e;
-      });
+      const autoPn = redditAutoHashes(get('auto_pn'));
       if (autoPn.length) {
         const allHashed = autoPn.every(looksHashedSha256);
         identifiers.push({

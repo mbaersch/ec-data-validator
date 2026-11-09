@@ -63,10 +63,10 @@ Beyond Google Ads / GA4, the extension can flag when personal data leaves the br
 - **Meta Pixel** — advanced-matching fields (`ud[em]`, `ud[ph]`, `ud[fn]`, …) on `facebook.com` / `connect.facebook.net`
 - **TikTok Pixel** — the nested `context.user` object (`email`, `phone`, …) on `analytics.tiktok.com`
 - **Pinterest** — the `pd` enhanced-match payload (JSON or `pd[em]` bracket form) on `ct.pinterest.com`
-- **Bing UET** — the `pid` sub-querystring (`em`, `ph`, `fn`, `ln`) on `bat.bing.com` / `commerce.bing.com`
+- **Bing UET** — the `pid` sub-querystring (`em`, `ph`, `fn`, `ln`) on `bat.bing.com` / `bat.bing.net` / `commerce.bing.com`
 - **LinkedIn Insight Tag** — the hashed email (`hem`) that rides in the gzip-compressed `/wa/` POST on `px.ads.linkedin.com` (the panel decodes `base64(gzip(JSON))` transparently)
 - **Snapchat Pixel** — the GET `/p` tracking beacon on `tr.snapchat.com`, hashing email, phone, name plus **age and geo** (`u_hem`, `u_hpn`, `u_age`, `l_city`, …); the POST telemetry beacon carries no identifiers and is ignored
-- **Reddit Pixel** — the `rp.gif` beacon on `alb.reddit.com`, with manual (`em`, `pn`) and **auto-collected** (`auto_em` comma list, `auto_pn` `weight~hash` pipe list) advanced matching plus an opaque `external_id`
+- **Reddit Pixel** — the `rp.gif` beacon on `alb.reddit.com`, with manual (`em`, `pn`) and **auto-collected** (`auto_em` and `auto_pn`, each a `weight~hash` pipe list) advanced matching plus an opaque `external_id`
 - **OpenAI Ad Measurement Pixel** — the batched JSON POST to `bzr.openai.com/v1/sdk/events`, whose user block is nested **by origin**: `in` is what the site handed to `oaiq('init')`, while `fm` / `js` / `ht` were scraped off the page by the SDK itself. The detector keeps them apart, so you can see *who supplied which identifier* — and spot when the two disagree
 
 Each detector is enabled individually in the **Settings** tab. Enabling one triggers a **runtime permission request** for just that service's origins (via `optional_host_permissions`, so the installed manifest never changes); disabling revokes it again. Captured requests appear in the same clickable card list, each leading with a **service-name pill** and **tinted per provider** (Meta cool-blue, TikTok fuchsia, Pinterest red, Bing teal, LinkedIn azure, Snapchat yellow, Reddit orangered, OpenAI black) so the source is obvious at a glance. Google Ads — the focus of the tool — stays a plain card with just a neutral grey rail. Once at least one non-Google detector is enabled, a **per-service filter bar** appears above the card list to show/hide each service (with `all` / `none` shortcuts). A chip whose service actually produced captures carries an **activity dot** — deliberately also when the chip is switched *off*, because that is exactly when its cards are hidden and you would otherwise not notice the service firing at all. The dot pulses while recording and stays as a static marker once you stop.
@@ -180,6 +180,9 @@ The same service knowledge lives in three sibling projects ([tracking-auditor](h
 - **Meta `aud[em][0][v]`.** The nested form of automatic advanced matching is now a hash slot like `aud[em]`, so a plaintext value there is reported as a leak.
 - **Stape Data Client.** Requests of the Stape Data Tag to a server container (own JSON format, `?v=2&event=<name>` with the same `event_name` in the body, any path) become their own cards (service "Stape Data", pill "Data Client") on granted first-party origins: event name, `consent_state`, and user data from a `user_data` object or top-level `email_address` / `phone_number` / name fields — shown and analysed like Google `user_data`.
 - **Reddit `POST /rp`.** The current pixel posts to `alb.reddit.com/rp` (event and id in the query, user data in the form body); only the `/rp.gif` beacon was recognised.
+- **Reddit `auto_em`.** Like `auto_pn` it is a pipe list of `weight~hash` entries, not a comma list; read as one value it was reported as an unhashed leak.
+- **Bing UET on `bat.bing.net`.** The tag sends the same hits to `bat.bing.net` on some page loads; only `bat.bing.com` was recognised. If Bing was enabled before, switch it on again once to grant the added host.
+- **Floodlight ping skipped.** A `ccm/collect` hit with a `DC-` tag id and no user data is a Google tag measurement ping, not an Ads conversion, and no longer becomes a card.
 - New `tests/parsing.spec.js`: runs `background.js` and `detectors.js` in a Node vm (no browser) against real requests captured on the ectest page and a test gateway.
 
 ### v2.9.0

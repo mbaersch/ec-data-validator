@@ -1,7 +1,7 @@
 // Parsing in background.js / detectors.js without a browser: both scripts run in a
 // vm context with a no-op chrome stub, so the capture pipeline can be fed webRequest-
 // shaped details directly. Fixtures are real requests from the ectest.html playground.
-const { test, expect } = require('@playwright/test');
+const { test, expect } = require('playwright/test');
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
@@ -116,5 +116,28 @@ test('Reddit: the current POST /rp (form body) is captured like the /rp.gif beac
   await new Promise(r => setTimeout(r, 20));
   const [c] = captures(ctx);
   expect(c).toMatchObject({ provider: 'reddit', event: 'PageVisit' });
+  expect(c.identifiers.find(f => f.field === 'em').hashed).toBe(true);
+});
+
+test('Reddit: real Lead — auto_em is a weight~hash pipe list, all entries hashed', async () => {
+  const ctx = loadExtension();
+  vm.runInContext('enabledDetectors = { reddit: true };', ctx);
+  ctx.handleRequest({ url: 'https://alb.reddit.com/rp', method: 'POST', timeStamp: 1, tabId: -1,
+    requestBody: raw(fx.REDDIT_LEAD_PARAMS) });
+  await new Promise(r => setTimeout(r, 20));
+  const [c] = captures(ctx);
+  expect(c).toMatchObject({ provider: 'reddit', event: 'Lead', providerId: 'a2_jaf5nb3r9amc' });
+  const byField = Object.fromEntries(c.identifiers.map(f => [f.field, f]));
+  expect(byField.auto_em).toMatchObject({ label: 'Auto email ×3', hashed: true, plaintext: false });
+  expect(byField.auto_pn).toMatchObject({ label: 'Auto phone ×5', hashed: true });
+});
+
+test('Bing: UET on bat.bing.net is captured like bat.bing.com', async () => {
+  const ctx = loadExtension();
+  vm.runInContext('enabledDetectors = { bing: true };', ctx);
+  ctx.handleRequest({ url: fx.BING_NET_CUSTOM, method: 'GET', timeStamp: 1, tabId: -1, requestBody: null });
+  await new Promise(r => setTimeout(r, 20));
+  const [c] = captures(ctx);
+  expect(c).toMatchObject({ provider: 'bing', host: 'bat.bing.net' });
   expect(c.identifiers.find(f => f.field === 'em').hashed).toBe(true);
 });

@@ -430,7 +430,7 @@ die ohne `+` hashen).
 | `em`          | Email       | SHA256  | `trim().toLowerCase()`.                                 |
 | `pn`          | Phone       | SHA256  | E.164 **mit `+`**.                                      |
 | `external_id` | External ID | SHA256  | opak (exact/case-preserving), nie als Leak markiert.    |
-| `auto_em`     | Email       | SHA256  | **Komma-Liste** auto-erfasster Hashes.                  |
+| `auto_em`     | Email       | SHA256  | **Pipe-Liste** `<Gewicht>~<Hash>` wie `auto_pn` (live 2026-11-09; früher als Komma-Liste angenommen).                  |
 | `auto_pn`     | Phone       | SHA256  | **Pipe-Liste** `gewicht~hash` auto-erfasster Hashes.    |
 
 Conversion/Metadaten in `m.*`; `m.valueDecimal` ist **Komma-Dezimal** (z. B.
