@@ -10,6 +10,8 @@ jobs:
   tests:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      EC_TMP_DIR: ${{ runner.temp }}/ec-data-validator
     steps:
       - uses: actions/checkout@v7
 
@@ -35,7 +37,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: test-results
-          path: test-results
+          path: ${{ env.EC_TMP_DIR }}/test-results
           retention-days: 7
 
   # Dienst-Erkennung gegen die Schwesterprojekte (abgleich/README.md im tracking-auditor). Eigener Job:
