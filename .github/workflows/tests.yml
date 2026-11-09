@@ -20,7 +20,7 @@ jobs:
       # Wie lokal: Playwright global, kein package-lock.json (npm ci und cache: npm scheitern daran)
       - name: Playwright global
         run: |
-          npm install -g playwright@1.58.2
+          npm install -g playwright@1.63.0
           echo "NODE_PATH=$(npm root -g)" >> "$GITHUB_ENV"
           echo "EC_TMP_DIR=$RUNNER_TEMP/ec-data-validator" >> "$GITHUB_ENV"
 
