@@ -3,10 +3,11 @@ const path = require('path');
 const fs = require('fs');
 const fixtures = require('../tests/fixtures.js');
 const { CAPTURES } = require('../tests/detector-fixtures.js');
+const tmpDir = require('../tests/tmp-dir.js');
 
 async function generateScreenshots() {
   const extensionPath = path.resolve(__dirname, '..');
-  const userDataDir = path.resolve(__dirname, '..', 'tmp-user-data-shots');
+  const userDataDir = tmpDir('tmp-user-data-shots');
   const screenshotDir = path.resolve(__dirname, '..', 'screenshots');
 
   if (fs.existsSync(userDataDir)) fs.rmSync(userDataDir, { recursive: true, force: true });

@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const fixtures = require('../tests/fixtures.js');
 const { CAPTURES } = require('../tests/detector-fixtures.js');
+const tmpDir = require('../tests/tmp-dir.js');
 
 const MERCH_URL = 'https://shop.googlemerchandisestore.com/';
 const VIEW_W = 1280;
@@ -164,7 +165,7 @@ async function captureMerchBackground(context) {
 
 async function generateStoreScreenshots() {
   const extensionPath = path.resolve(__dirname, '..');
-  const userDataDir = path.resolve(__dirname, '..', 'tmp-user-data-store');
+  const userDataDir = tmpDir('tmp-user-data-store');
   const webstoreDir = path.resolve(__dirname, '..', 'webstore');
 
   if (fs.existsSync(userDataDir)) fs.rmSync(userDataDir, { recursive: true, force: true });

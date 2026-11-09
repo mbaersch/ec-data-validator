@@ -3,10 +3,10 @@ const path = require('path');
 const fs = require('fs');
 const fixtures = require('./fixtures.js');
 const detectorFixtures = require('./detector-fixtures.js');
+const tmpDir = require('./tmp-dir.js');
 
 const EXTENSION_PATH = path.resolve(__dirname, '..');
-// Overridable: Chrome cannot lock a profile on some network/VM shares.
-const USER_DATA_DIR = process.env.EC_USER_DATA_DIR || path.resolve(__dirname, '..', 'tmp-user-data-test');
+const USER_DATA_DIR = process.env.EC_USER_DATA_DIR || tmpDir('tmp-user-data-test');
 
 let context;
 let extensionId;

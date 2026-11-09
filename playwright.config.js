@@ -1,7 +1,9 @@
 const { defineConfig } = require('playwright/test');
+const tmpDir = require('./tests/tmp-dir.js');
 
 module.exports = defineConfig({
   testDir: './tests',
+  outputDir: tmpDir('test-results'),
   timeout: 30_000,
   expect: { timeout: 5_000 },
   fullyParallel: false,
