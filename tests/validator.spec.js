@@ -1,11 +1,12 @@
-const { test, expect, chromium } = require('@playwright/test');
+const { test, expect, chromium } = require('playwright/test');
 const path = require('path');
 const fs = require('fs');
 const fixtures = require('./fixtures.js');
 const detectorFixtures = require('./detector-fixtures.js');
 
 const EXTENSION_PATH = path.resolve(__dirname, '..');
-const USER_DATA_DIR = path.resolve(__dirname, '..', 'tmp-user-data-test');
+// Overridable: Chrome cannot lock a profile on some network/VM shares.
+const USER_DATA_DIR = process.env.EC_USER_DATA_DIR || path.resolve(__dirname, '..', 'tmp-user-data-test');
 
 let context;
 let extensionId;
