@@ -9,8 +9,5 @@
     "store-assets": "node scripts/generate-store-screenshots.js",
     "build": "node scripts/package-extension.js"
   },
-  "type": "commonjs",
-  "devDependencies": {
-    "@playwright/test": "^1.58.2"
-  }
+  "type": "commonjs"
 }

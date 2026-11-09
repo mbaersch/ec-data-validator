@@ -166,6 +166,8 @@ lightTest()          // 30s diagnostic listener that logs every match
 
 Parsing tests without a browser: `tests/parsing.spec.js` (Playwright test runner, Node vm).
 
+Tests and screenshot scripts use a globally installed Playwright (`npm i -g playwright`), not a local `node_modules`; `NODE_PATH` must point to the global module folder (`npm root -g`) so `require('playwright/test')` resolves.
+
 ### Keeping the sibling projects in step
 The same service knowledge lives in three sibling projects ([tracking-auditor](https://github.com/mbaersch/tracking-auditor), [stage-in-a-box](https://github.com/mbaersch/stage-in-a-box) and [tracking-auditor-extension](https://github.com/mbaersch/tracking-auditor-extension)). How they are kept in step — which project is the source for what, intentional gaps, and a script that runs reference requests for every format variant through all of them — is described in the tracking-auditor repo under [abgleich/README.md](https://github.com/mbaersch/tracking-auditor/blob/master/abgleich/README.md) (German). After changing an endpoint, a parser or a decoded format, run it there. The detectors here are an adapted port of that extension's parsers, not a copy.
 
