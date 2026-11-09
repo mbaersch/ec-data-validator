@@ -16,12 +16,15 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 22
-          cache: npm
 
-      - run: npm ci
+      # Wie lokal: Playwright global, kein package-lock.json (npm ci und cache: npm scheitern daran)
+      - name: Playwright global
+        run: |
+          npm install -g playwright@1.58.2
+          echo "NODE_PATH=$(npm root -g)" >> "$GITHUB_ENV"
 
       - name: Chromium für Playwright
-        run: npx playwright install --with-deps chromium
+        run: playwright install --with-deps chromium
 
       # Die Extension braucht einen sichtbaren Browser (headless: false), deshalb ein virtuelles Display
       - name: Tests
