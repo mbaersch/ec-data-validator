@@ -171,7 +171,7 @@ The same service knowledge lives in three sibling projects ([tracking-auditor](h
 
 ## Changelog
 
-### Unreleased
+### v2.10.0
 
 - **GA4 currency from `cu`.** gtag sends the event currency as `cu`; only `ep.currency` was read, so a real `generate_lead` with a value showed it without currency.
 - **One capture per batched GA4 event.** GA4 sends several events in one POST, one per body line. Parsed as one blob, every event after the first disappeared (and the first key of each line was swallowed). Each line is now its own capture.

@@ -40,8 +40,11 @@ filesToInclude.forEach(file => {
 
 console.log('Creating ZIP archive...');
 try {
-  const psCommand = `powershell -Command "Compress-Archive -Path '${distDir}\\*' -DestinationPath '${zipFile}' -Force"`;
-  execSync(psCommand);
+  if (process.platform === 'win32') {
+    execSync(`powershell -Command "Compress-Archive -Path '${distDir}\\*' -DestinationPath '${zipFile}' -Force"`);
+  } else {
+    execSync(`zip -q -r '${zipFile}' .`, { cwd: distDir });
+  }
   console.log(`Success! Extension packaged to: ${zipFile}`);
 } catch (error) {
   console.error('Error creating ZIP:', error.message);
