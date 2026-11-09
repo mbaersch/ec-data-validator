@@ -169,6 +169,8 @@ Parsing tests without a browser: `tests/parsing.spec.js` (Playwright test runner
 ### Keeping the sibling projects in step
 The same service knowledge lives in three sibling projects ([tracking-auditor](https://github.com/mbaersch/tracking-auditor), [stage-in-a-box](https://github.com/mbaersch/stage-in-a-box) and [tracking-auditor-extension](https://github.com/mbaersch/tracking-auditor-extension)). How they are kept in step — which project is the source for what, intentional gaps, and a script that runs reference requests for every format variant through all of them — is described in the tracking-auditor repo under [abgleich/README.md](https://github.com/mbaersch/tracking-auditor/blob/master/abgleich/README.md) (German). After changing an endpoint, a parser or a decoded format, run it there. The detectors here are an adapted port of that extension's parsers, not a copy.
 
+GitHub Actions runs the tests (with a virtual display for the popup tests) and this comparison on every push and pull request (`.github/workflows/tests.yml`), the comparison as a separate job against the current state of the sibling repos. During a change that spans several repos it stays red until all of them are updated.
+
 ## Changelog
 
 ### v2.10.0
